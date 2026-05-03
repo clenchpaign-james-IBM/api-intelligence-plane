@@ -455,7 +455,7 @@ class SecurityService:
             gateway_id: Optional gateway filter
 
         Returns:
-            Security posture metrics
+            Security posture metrics showing open vulnerabilities with remediation rate
         """
         try:
             posture = await self.vulnerability_repository.get_security_posture(
@@ -463,16 +463,16 @@ class SecurityService:
                 gateway_id=gateway_id
             )
 
-            # Calculate additional metrics
-            total = posture["total_vulnerabilities"]
+            # Calculate remediation rate from ALL vulnerabilities (by_status has all statuses)
             by_status = posture["by_status"]
+            total_all_vulnerabilities = sum(by_status.values())
             
             remediation_rate = 0
-            if total > 0:
+            if total_all_vulnerabilities > 0:
                 remediated = by_status.get("remediated", 0)
-                remediation_rate = (remediated / total) * 100
+                remediation_rate = (remediated / total_all_vulnerabilities) * 100
 
-            # Calculate risk score (0-100, higher is worse)
+            # Calculate risk score based on open vulnerabilities (0-100, higher is worse)
             risk_score = self._calculate_risk_score(posture)
 
             return {

@@ -23,14 +23,15 @@ export const APISecurityCard: React.FC<APISecurityCardProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Calculate security metrics
-  const criticalCount = vulnerabilities.filter(v => v.severity === 'critical').length;
-  const highCount = vulnerabilities.filter(v => v.severity === 'high').length;
-  const mediumCount = vulnerabilities.filter(v => v.severity === 'medium').length;
-  const lowCount = vulnerabilities.filter(v => v.severity === 'low').length;
+  // Calculate security metrics - ONLY for OPEN vulnerabilities
+  const openVulnerabilities = vulnerabilities.filter(v => v.status === 'open');
+  const criticalCount = openVulnerabilities.filter(v => v.severity === 'critical').length;
+  const highCount = openVulnerabilities.filter(v => v.severity === 'high').length;
+  const mediumCount = openVulnerabilities.filter(v => v.severity === 'medium').length;
+  const lowCount = openVulnerabilities.filter(v => v.severity === 'low').length;
   const totalCount = vulnerabilities.length;
 
-  const openCount = vulnerabilities.filter(v => v.status === 'open').length;
+  const openCount = openVulnerabilities.length;
   const remediatedCount = vulnerabilities.filter(v =>
     v.status === 'remediated' || v.verification_status === 'verified'
   ).length;
@@ -38,6 +39,7 @@ export const APISecurityCard: React.FC<APISecurityCardProps> = ({
   // Debug logging
   console.log(`[APISecurityCard] API: ${api.name}`);
   console.log(`[APISecurityCard] Total vulnerabilities: ${vulnerabilities.length}`);
+  console.log(`[APISecurityCard] Open vulnerabilities: ${openCount}`);
   console.log(`[APISecurityCard] Vulnerabilities:`, vulnerabilities.map(v => ({
     id: v.id,
     title: v.title,
@@ -46,7 +48,7 @@ export const APISecurityCard: React.FC<APISecurityCardProps> = ({
   })));
   console.log(`[APISecurityCard] Open count: ${openCount}, Remediated count: ${remediatedCount}`);
 
-  // Calculate risk score (0-100, higher is worse)
+  // Calculate risk score (0-100, higher is worse) - ONLY from OPEN vulnerabilities
   const riskScore = Math.min(
     criticalCount * 40 + highCount * 25 + mediumCount * 15 + lowCount * 5,
     100

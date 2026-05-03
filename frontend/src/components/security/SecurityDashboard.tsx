@@ -57,7 +57,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
           onClick={onViewAllVulnerabilities}
           className="p-4 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:shadow-md transition-all text-left cursor-pointer"
         >
-          <div className="text-sm font-medium text-blue-700 mb-1">Total Vulnerabilities</div>
+          <div className="text-sm font-medium text-blue-700 mb-1">Open Vulnerabilities</div>
           <div className="text-3xl font-bold text-blue-900">{posture.total_vulnerabilities}</div>
           {onViewAllVulnerabilities && (
             <div className="text-xs text-blue-600 mt-2">Click to view all →</div>
