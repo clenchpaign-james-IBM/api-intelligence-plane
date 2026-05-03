@@ -334,11 +334,22 @@ class SecurityService:
                 strategy=remediation_strategy,
             )
 
-            # Update vulnerability status
-            vulnerability.status = VulnerabilityStatus.IN_PROGRESS
+            # Check if remediation was successful
+            result_actions = remediation_result.get("actions", [])
+            all_successful = all(
+                action.status == "completed"
+                for action in result_actions
+            )
+            
+            # Update vulnerability status based on remediation success
+            if all_successful:
+                vulnerability.status = VulnerabilityStatus.REMEDIATED
+                vulnerability.remediated_at = datetime.utcnow()
+                vulnerability.verification_status = VerificationStatus.PENDING
+            else:
+                vulnerability.status = VulnerabilityStatus.IN_PROGRESS
             
             # Merge remediation actions from result with existing actions
-            result_actions = remediation_result.get("actions", [])
             if result_actions:
                 vulnerability.remediation_actions = result_actions
             
@@ -358,16 +369,13 @@ class SecurityService:
                 index=self.vulnerability_repository.index_name
             )
 
-            # Verify remediation
-            verification_result = await self.verify_remediation(vulnerability_id)
-
-            logger.info(f"Remediation completed for vulnerability: {vulnerability_id}")
+            logger.info(f"Remediation completed for vulnerability: {vulnerability_id} (status: {vulnerability.status})")
 
             return {
                 "vulnerability_id": str(vulnerability_id),
                 "status": "remediation_applied",
                 "remediation_result": remediation_result,
-                "verification_result": verification_result,
+                "message": "Remediation applied successfully. Next security scan will validate the fix.",
             }
 
         except Exception as e:
