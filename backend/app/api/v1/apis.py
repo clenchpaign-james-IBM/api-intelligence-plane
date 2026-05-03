@@ -454,5 +454,114 @@ async def get_gateway_api_security_policies(gateway_id: UUID, api_id: UUID) -> l
             detail=f"Failed to get security policies: {str(e)}",
         )
 
+@router.get(
+    "/apis/search",
+    response_model=APIListResponse,
+    summary="Search APIs with multiple filters",
+)
+async def search_apis(
+    name: Optional[str] = Query(None, description="API name pattern (case-insensitive wildcard)"),
+    description: Optional[str] = Query(None, description="Description pattern (text search)"),
+    api_status: Optional[APIStatus] = Query(None, alias="status", description="API status filter"),
+    authentication_type: Optional[str] = Query(None, description="Authentication type filter"),
+    is_shadow: Optional[bool] = Query(None, description="Filter shadow APIs"),
+    health_score_min: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum health score (0.0-1.0)"),
+    health_score_max: Optional[float] = Query(None, ge=0.0, le=1.0, description="Maximum health score (0.0-1.0)"),
+    gateway_id: Optional[UUID] = Query(None, description="Filter by gateway ID"),
+    created_after: Optional[str] = Query(None, description="Filter APIs created after this date (ISO 8601)"),
+    created_before: Optional[str] = Query(None, description="Filter APIs created before this date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+) -> APIListResponse:
+    """
+    Search APIs with multiple filter criteria.
+    
+    This endpoint provides flexible multi-criteria filtering for agents,
+    complementing the list endpoint with text pattern matching, health score
+    ranges, and date filters.
+    
+    Args:
+        name: API name pattern (case-insensitive wildcard match)
+        description: Description pattern (text search)
+        api_status: API status filter
+        authentication_type: Authentication type filter
+        is_shadow: Filter for shadow APIs (True/False/None for all)
+        health_score_min: Minimum health score (0.0-1.0)
+        health_score_max: Maximum health score (0.0-1.0)
+        gateway_id: Filter by gateway ID
+        created_after: Filter APIs created after this date (ISO 8601)
+        created_before: Filter APIs created before this date (ISO 8601)
+        page: Page number (1-based)
+        page_size: Number of items per page
+        
+    Returns:
+        Paginated list of matching APIs
+        
+    Examples:
+        - Find APIs with "payment" in name that have authentication enabled:
+          GET /api/v1/apis/search?name=payment&authentication_type=oauth2
+        
+        - Find shadow APIs with low health scores:
+          GET /api/v1/apis/search?is_shadow=true&health_score_max=0.5
+    """
+    try:
+        from datetime import datetime
+        from app.models.base.api import AuthenticationType
+        
+        repo = APIRepository()
+        
+        # Parse datetime strings if provided
+        created_after_dt = datetime.fromisoformat(created_after.replace('Z', '+00:00')) if created_after else None
+        created_before_dt = datetime.fromisoformat(created_before.replace('Z', '+00:00')) if created_before else None
+        
+        # Parse authentication type if provided
+        auth_type = None
+        if authentication_type:
+            try:
+                auth_type = AuthenticationType(authentication_type.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid authentication_type: {authentication_type}. Valid values: none, basic, bearer, oauth2, api_key, mtls, custom"
+                )
+        
+        # Call repository search method
+        apis, total = repo.search_apis(
+            name=name,
+            description=description,
+            status=api_status,
+            authentication_type=auth_type,
+            is_shadow=is_shadow,
+            health_score_min=health_score_min,
+            health_score_max=health_score_max,
+            gateway_id=gateway_id,
+            created_after=created_after_dt,
+            created_before=created_before_dt,
+            page=page,
+            page_size=page_size,
+        )
+        
+        return APIListResponse(
+            items=apis,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}. Use ISO 8601 format (e.g., 2026-04-25T00:00:00Z)"
+        )
+    except Exception as e:
+        logger.error(f"Failed to search APIs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search APIs: {str(e)}",
+        )
+
+
 
 # Made with Bob

@@ -99,6 +99,15 @@ class CompliancePostureResponse(BaseModel):
     next_audit_date: str = Field(..., description="Next recommended audit date")
 
 
+class ComplianceViolationListResponse(BaseModel):
+    """Response model for listing compliance violations."""
+    
+    items: List[ComplianceViolation]
+    total: int
+    page: int
+    page_size: int
+
+
 # API Endpoints
 @router.post(
     "/gateways/{gateway_id}/compliance/scan",
@@ -514,5 +523,102 @@ async def get_gateway_violation(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get violation: {str(e)}",
         )
+
+@router.get(
+    "/compliance/violations/search",
+    response_model=ComplianceViolationListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Search compliance violations with multiple filters",
+    description="Search compliance violations across all gateways with flexible multi-criteria filtering",
+)
+async def search_compliance_violations(
+    standard: Optional[ComplianceStandard] = Query(None, description="Filter by compliance standard"),
+    violation_type: Optional[str] = Query(None, description="Filter by violation type (e.g., 'missing_encryption')"),
+    severity: Optional[ComplianceSeverity] = Query(None, description="Filter by severity"),
+    compliance_status: Optional[ComplianceStatus] = Query(None, alias="status", description="Filter by status"),
+    api_name: Optional[str] = Query(None, description="Filter by API name pattern (case-insensitive wildcard)"),
+    gateway_id: Optional[UUID] = Query(None, description="Filter by gateway ID"),
+    discovered_after: Optional[datetime] = Query(None, description="Filter violations discovered after this date (ISO 8601)"),
+    discovered_before: Optional[datetime] = Query(None, description="Filter violations discovered before this date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size (max 100)"),
+    compliance_service: ComplianceService = Depends(get_compliance_service),
+) -> ComplianceViolationListResponse:
+    """
+    Search compliance violations with multiple filters.
+    
+    Supports flexible filtering by:
+    - Compliance standard (GDPR, HIPAA, PCI_DSS, SOC2, ISO27001)
+    - Violation type (e.g., 'missing_encryption', 'inadequate_logging')
+    - Severity (critical, high, medium, low)
+    - Status (open, in_progress, resolved, accepted)
+    - API name pattern (case-insensitive wildcard search)
+    - Gateway ID
+    - Discovery date range
+    
+    All filters are optional and combined with AND logic.
+    Results are paginated with configurable page size (max 100).
+    
+    Args:
+        standard: Optional compliance standard filter
+        violation_type: Optional violation type filter
+        severity: Optional severity filter
+        compliance_status: Optional status filter
+        api_name: Optional API name pattern (case-insensitive)
+        gateway_id: Optional gateway ID filter
+        discovered_after: Optional start date for discovery range
+        discovered_before: Optional end date for discovery range
+        page: Page number (1-based)
+        page_size: Number of items per page (max 100)
+        compliance_service: Compliance service dependency
+        
+    Returns:
+        Paginated list of compliance violations matching filters
+        
+    Raises:
+        HTTPException: If search fails
+    """
+    try:
+        logger.info(
+            f"Searching compliance violations: standard={standard}, violation_type={violation_type}, "
+            f"severity={severity}, status={compliance_status}, api_name={api_name}, "
+            f"gateway_id={gateway_id}, discovered_after={discovered_after}, "
+            f"discovered_before={discovered_before}, page={page}, page_size={page_size}"
+        )
+        
+        from app.db.repositories.compliance_repository import ComplianceRepository
+        
+        compliance_repo = ComplianceRepository()
+        
+        # Call repository search method
+        violations, total = compliance_repo.search_compliance_violations(
+            standard=standard,
+            violation_type=violation_type,
+            severity=severity,
+            status=compliance_status,
+            api_name=api_name,
+            gateway_id=gateway_id,
+            discovered_after=discovered_after,
+            discovered_before=discovered_before,
+            page=page,
+            page_size=page_size,
+        )
+        
+        logger.info(f"Found {total} compliance violations matching search criteria")
+        
+        return ComplianceViolationListResponse(
+            items=violations,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to search compliance violations: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search compliance violations: {str(e)}",
+        )
+
 
 # Made with Bob

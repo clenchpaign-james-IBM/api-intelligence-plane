@@ -4,8 +4,10 @@ Recommendation Repository
 Handles CRUD operations and queries for optimization recommendations.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+from uuid import UUID
 
 from app.db.repositories.base import BaseRepository
 from app.models.recommendation import (
@@ -71,6 +73,78 @@ class RecommendationRepository(BaseRepository[OptimizationRecommendation]):
 
         recommendations, _ = self.search(query=query, size=1)
         return recommendations[0] if recommendations else None
+
+    async def mark_outdated_as_expired(
+        self,
+        gateway_id: UUID,
+        api_id: UUID,
+        current_recommendation_ids: list[UUID],
+    ) -> int:
+        """Mark recommendations not in current list as expired.
+        
+        This method finds all PENDING recommendations for an API that are NOT
+        in the current recommendation list and marks them as EXPIRED.
+        
+        Args:
+            gateway_id: Gateway identifier
+            api_id: API identifier
+            current_recommendation_ids: List of recommendation IDs from current analysis
+            
+        Returns:
+            Number of recommendations marked as expired
+        """
+        from datetime import datetime
+        
+        # Build query for PENDING recommendations not in current list
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"gateway_id": str(gateway_id)}},
+                    {"term": {"api_id": str(api_id)}},
+                    {"term": {"status": RecommendationStatus.PENDING.value}},
+                ],
+                "must_not": [
+                    {"terms": {"id.keyword": [str(rid) for rid in current_recommendation_ids]}}
+                ] if current_recommendation_ids else []
+            }
+        }
+        
+        # Update script to mark as expired
+        script = {
+            "source": """
+                ctx._source.status = params.status;
+                ctx._source.updated_at = params.updated_at;
+            """,
+            "params": {
+                "status": RecommendationStatus.EXPIRED.value,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+        }
+        
+        body = {
+            "query": query,
+            "script": script,
+        }
+        
+        try:
+            response = self.client.update_by_query(
+                index=self.index_name,
+                body=body,
+            )
+            # Refresh index after update
+            self.client.indices.refresh(index=self.index_name)
+            updated_count = response.get("updated", 0)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Marked {updated_count} recommendations as expired for API {api_id} in gateway {gateway_id}"
+            )
+            return updated_count
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to mark recommendations as expired: {e}")
+            return 0
 
     def get_recommendation(
         self, recommendation_id: str
@@ -459,6 +533,152 @@ class RecommendationRepository(BaseRepository[OptimizationRecommendation]):
         )
 
         return result.get("deleted", 0)
+
+    def search_recommendations(
+        self,
+        type: Optional[RecommendationType] = None,
+        priority: Optional[RecommendationPriority] = None,
+        status: Optional[RecommendationStatus] = None,
+        impact_min: Optional[float] = None,
+        impact_max: Optional[float] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[UUID] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[List[OptimizationRecommendation], int]:
+        """
+        Search optimization recommendations with multiple filter criteria.
+        
+        This method provides flexible multi-criteria filtering for agents,
+        complementing existing list/get methods with type, priority, status,
+        impact range, and date filtering.
+        
+        Args:
+            type: Recommendation type filter (caching, rate_limiting, etc.)
+            priority: Recommendation priority filter (critical, high, medium, low)
+            status: Recommendation status filter (pending, implemented, rejected)
+            impact_min: Minimum expected impact percentage (0-100)
+            impact_max: Maximum expected impact percentage (0-100)
+            api_name: API name pattern (case-insensitive wildcard match)
+            gateway_id: Filter by gateway ID
+            created_after: Filter recommendations created after this date
+            created_before: Filter recommendations created before this date
+            page: Page number (1-based)
+            page_size: Number of results per page (default: 20, max: 100)
+            
+        Returns:
+            Tuple of (list of recommendations, total count)
+            
+        Examples:
+            # Find caching recommendations with high priority that are pending
+            recs, total = repo.search_recommendations(
+                type=RecommendationType.CACHING,
+                priority=RecommendationPriority.HIGH,
+                status=RecommendationStatus.PENDING
+            )
+            
+            # Find high-impact recommendations (>20%)
+            recs, total = repo.search_recommendations(
+                impact_min=20.0,
+                status=RecommendationStatus.PENDING
+            )
+        """
+        # Validate and normalize pagination
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        from_ = (page - 1) * page_size
+        
+        # Validate impact ranges
+        if impact_min is not None:
+            impact_min = max(0.0, min(100.0, impact_min))
+        if impact_max is not None:
+            impact_max = max(0.0, min(100.0, impact_max))
+        
+        # Build bool query with must clauses
+        must_clauses = []
+        
+        # Type filter
+        if type:
+            type_value = type.value if isinstance(type, RecommendationType) else type
+            must_clauses.append({
+                "term": {"recommendation_type": type_value}
+            })
+        
+        # Priority filter
+        if priority:
+            priority_value = priority.value if isinstance(priority, RecommendationPriority) else priority
+            must_clauses.append({
+                "term": {"priority": priority_value}
+            })
+        
+        # Status filter
+        if status:
+            status_value = status.value if isinstance(status, RecommendationStatus) else status
+            must_clauses.append({
+                "term": {"status": status_value}
+            })
+        
+        # Impact range
+        if impact_min is not None or impact_max is not None:
+            range_query: Dict[str, Any] = {}
+            if impact_min is not None:
+                range_query["gte"] = impact_min
+            if impact_max is not None:
+                range_query["lte"] = impact_max
+            must_clauses.append({
+                "range": {"expected_impact": range_query}
+            })
+        
+        # API name filter (case-insensitive wildcard)
+        if api_name:
+            must_clauses.append({
+                "wildcard": {
+                    "api_name": {
+                        "value": f"*{api_name.lower()}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
+        
+        # Gateway filter
+        if gateway_id:
+            must_clauses.append({
+                "term": {"gateway_id": str(gateway_id)}
+            })
+        
+        # Date range filters
+        if created_after or created_before:
+            date_range_query: Dict[str, Any] = {}
+            if created_after:
+                date_range_query["gte"] = created_after.isoformat()
+            if created_before:
+                date_range_query["lte"] = created_before.isoformat()
+            must_clauses.append({
+                "range": {"created_at": date_range_query}
+            })
+        
+        # Build final query
+        query = {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}]
+            }
+        }
+        
+        # Execute search with sorting by priority (critical first) and created_at (newest first)
+        sort = [
+            {"priority": {"order": "asc"}},  # critical < high < medium < low
+            {"created_at": {"order": "desc"}}
+        ]
+        
+        try:
+            recommendations, total = self.search(query, size=page_size, from_=from_, sort=sort)
+            return recommendations, total
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to search recommendations: {e}")
+            return [], 0
 
 
 # Made with Bob

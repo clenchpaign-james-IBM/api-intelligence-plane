@@ -635,6 +635,320 @@ class BackendClient:
             payload["end_date"] = end_date
         
         return await self._request("POST", f"/gateways/{gateway_id}/compliance/reports/audit", json=payload)
+    
+    # Search Endpoints (Feature: 002-agentic-query User Story 5)
+    
+    async def search_gateways(
+        self,
+        name: Optional[str] = None,
+        vendor: Optional[str] = None,
+        status: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search gateways using flexible multi-criteria filtering.
+        
+        Args:
+            name: Gateway name pattern (case-insensitive partial match)
+            vendor: Gateway vendor filter
+            status: Status filter
+            created_after: Created after date (ISO 8601)
+            created_before: Created before date (ISO 8601)
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if name:
+            params["name"] = name
+        if vendor:
+            params["vendor"] = vendor
+        if status:
+            params["status"] = status
+        if created_after:
+            params["created_after"] = created_after
+        if created_before:
+            params["created_before"] = created_before
+        
+        return await self._request("GET", "/gateways/search", params=params)
+    
+    async def search_all_apis(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        status: Optional[str] = None,
+        authentication_type: Optional[str] = None,
+        is_shadow: Optional[bool] = None,
+        health_score_min: Optional[float] = None,
+        health_score_max: Optional[float] = None,
+        gateway_id: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search APIs across all gateways using flexible multi-criteria filtering.
+        
+        Args:
+            name: API name pattern (case-insensitive partial match)
+            description: Description pattern (case-insensitive partial match)
+            status: Status filter
+            authentication_type: Authentication type filter
+            is_shadow: Shadow API filter
+            health_score_min: Minimum health score (0.0-1.0)
+            health_score_max: Maximum health score (0.0-1.0)
+            gateway_id: Optional gateway filter
+            created_after: Created after date (ISO 8601)
+            created_before: Created before date (ISO 8601)
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if name:
+            params["name"] = name
+        if description:
+            params["description"] = description
+        if status:
+            params["status"] = status
+        if authentication_type:
+            params["authentication_type"] = authentication_type
+        if is_shadow is not None:
+            params["is_shadow"] = is_shadow
+        if health_score_min is not None:
+            params["health_score_min"] = health_score_min
+        if health_score_max is not None:
+            params["health_score_max"] = health_score_max
+        if gateway_id:
+            params["gateway_id"] = gateway_id
+        if created_after:
+            params["created_after"] = created_after
+        if created_before:
+            params["created_before"] = created_before
+        
+        return await self._request("GET", "/apis/search", params=params)
+    
+    async def search_vulnerabilities(
+        self,
+        severity: Optional[str] = None,
+        vulnerability_type: Optional[str] = None,
+        status: Optional[str] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[str] = None,
+        discovered_after: Optional[str] = None,
+        discovered_before: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> Dict[str, Any]:
+        """
+        Search security vulnerabilities using flexible multi-criteria filtering.
+        
+        Args:
+            severity: Severity filter (critical, high, medium, low)
+            vulnerability_type: Type filter
+            status: Status filter (open, remediated, in_progress, verified)
+            api_name: API name pattern (case-insensitive partial match)
+            gateway_id: Optional gateway filter
+            discovered_after: Discovered after date (ISO 8601)
+            discovered_before: Discovered before date (ISO 8601)
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if severity:
+            params["severity"] = severity
+        if vulnerability_type:
+            params["type"] = vulnerability_type
+        if status:
+            params["status"] = status
+        if api_name:
+            params["api_name"] = api_name
+        if gateway_id:
+            params["gateway_id"] = gateway_id
+        if discovered_after:
+            params["discovered_after"] = discovered_after
+        if discovered_before:
+            params["discovered_before"] = discovered_before
+        
+        return await self._request("GET", "/security/vulnerabilities/search", params=params)
+    
+    async def search_compliance_violations(
+        self,
+        standard: Optional[str] = None,
+        violation_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[str] = None,
+        discovered_after: Optional[str] = None,
+        discovered_before: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> Dict[str, Any]:
+        """
+        Search compliance violations using flexible multi-criteria filtering.
+        
+        Args:
+            standard: Standard filter (GDPR, HIPAA, SOC2, PCI_DSS, ISO_27001)
+            violation_type: Violation type filter
+            severity: Severity filter (critical, high, medium, low)
+            status: Status filter (open, in_progress, remediated)
+            api_name: API name pattern (case-insensitive partial match)
+            gateway_id: Optional gateway filter
+            discovered_after: Discovered after date (ISO 8601)
+            discovered_before: Discovered before date (ISO 8601)
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if standard:
+            params["standard"] = standard
+        if violation_type:
+            params["violation_type"] = violation_type
+        if severity:
+            params["severity"] = severity
+        if status:
+            params["status"] = status
+        if api_name:
+            params["api_name"] = api_name
+        if gateway_id:
+            params["gateway_id"] = gateway_id
+        if discovered_after:
+            params["discovered_after"] = discovered_after
+        if discovered_before:
+            params["discovered_before"] = discovered_before
+        
+        return await self._request("GET", "/compliance/violations/search", params=params)
+    
+    async def search_recommendations(
+        self,
+        recommendation_type: Optional[str] = None,
+        priority: Optional[str] = None,
+        status: Optional[str] = None,
+        impact_min: Optional[float] = None,
+        impact_max: Optional[float] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search optimization recommendations using flexible multi-criteria filtering.
+        
+        Args:
+            recommendation_type: Type filter (caching, compression, rate_limiting)
+            priority: Priority filter (high, medium, low)
+            status: Status filter (pending, implemented, rejected)
+            impact_min: Minimum expected impact percentage (0-100)
+            impact_max: Maximum expected impact percentage (0-100)
+            api_name: API name pattern (case-insensitive partial match)
+            gateway_id: Optional gateway filter
+            created_after: Created after date (ISO 8601)
+            created_before: Created before date (ISO 8601)
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if recommendation_type:
+            params["type"] = recommendation_type
+        if priority:
+            params["priority"] = priority
+        if status:
+            params["status"] = status
+        if impact_min is not None:
+            params["impact_min"] = impact_min
+        if impact_max is not None:
+            params["impact_max"] = impact_max
+        if api_name:
+            params["api_name"] = api_name
+        if gateway_id:
+            params["gateway_id"] = gateway_id
+        if created_after:
+            params["created_after"] = created_after
+        if created_before:
+            params["created_before"] = created_before
+        
+        return await self._request("GET", "/optimization/recommendations/search", params=params)
+    
+    async def search_predictions(
+        self,
+        prediction_type: Optional[str] = None,
+        confidence_min: Optional[float] = None,
+        confidence_max: Optional[float] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        predicted_after: Optional[str] = None,
+        predicted_before: Optional[str] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search failure predictions using flexible multi-criteria filtering.
+        
+        Args:
+            prediction_type: Type filter (failure, performance_degradation, capacity_issue)
+            confidence_min: Minimum confidence score (0.0-1.0)
+            confidence_max: Maximum confidence score (0.0-1.0)
+            severity: Severity filter (critical, high, medium, low)
+            status: Status filter (active, resolved, false_positive, expired)
+            predicted_after: Predicted after date (ISO 8601)
+            predicted_before: Predicted before date (ISO 8601)
+            api_name: API name pattern (case-insensitive partial match)
+            gateway_id: Optional gateway filter
+            page: Page number
+            page_size: Items per page
+            
+        Returns:
+            Search results with items, total, page, page_size
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        
+        if prediction_type:
+            params["prediction_type"] = prediction_type
+        if confidence_min is not None:
+            params["confidence_min"] = confidence_min
+        if confidence_max is not None:
+            params["confidence_max"] = confidence_max
+        if severity:
+            params["severity"] = severity
+        if status:
+            params["status"] = status
+        if predicted_after:
+            params["predicted_after"] = predicted_after
+        if predicted_before:
+            params["predicted_before"] = predicted_before
+        if api_name:
+            params["api_name"] = api_name
+        if gateway_id:
+            params["gateway_id"] = gateway_id
+        
+        return await self._request("GET", "/predictions/search", params=params)
 
 
 

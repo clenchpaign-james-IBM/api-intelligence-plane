@@ -7,10 +7,12 @@ uvicorn[standard]>=0.32.0,<0.33.0
 python-multipart>=0.0.12,<0.1.0
 
 # AI/ML Framework
-langchain>=0.3.0,<2.0.0
-langchain-community>=0.3.0,<2.0.0
-langchain-openai>=0.2.0,<2.0.0
-langgraph>=0.2.0,<0.3.0
+# LangChain 1.2.16 (latest stable) with LangGraph 1.1.10
+langchain>=1.2.16,<2.0.0
+langchain-community>=0.3.0,<0.5.0
+langchain-openai>=1.2.0,<2.0.0
+langchain-core>=1.3.2,<2.0.0
+langgraph>=1.1.10,<2.0.0
 litellm>=1.52.0,<2.0.0
 
 # MCP Framework

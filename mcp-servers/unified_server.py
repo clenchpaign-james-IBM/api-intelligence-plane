@@ -13,7 +13,6 @@ This server consolidates functionality from:
 - Performance Optimization (generate recommendations, apply)
 - Rate Limiting (create policies, analyze effectiveness)
 - Failure Predictions (list, get details, explanations)
-- Natural Language Queries (execute queries, sessions)
 
 Port: 8007 (external) -> 8000 (internal)
 Transport: Streamable HTTP
@@ -127,7 +126,6 @@ class UnifiedMCPServer(BaseMCPServer):
                     "performance_optimization",
                     "rate_limiting",
                     "failure_predictions",
-                    "natural_language_queries",
                 ],
             })
             return info
@@ -462,7 +460,7 @@ class UnifiedMCPServer(BaseMCPServer):
             return await self.backend_client._request("POST", "/gateways/bulk-sync", json=payload, params=params)
         
         # ============================================================================
-        # API DISCOVERY & INVENTORY (5 tools)
+        # API DISCOVERY & INVENTORY (7 tools - includes 2 search tools)
         # ============================================================================
         
         @self.tool(description="List all APIs across all gateways with comprehensive filtering")
@@ -650,6 +648,142 @@ class UnifiedMCPServer(BaseMCPServer):
                 ...     print(f"  - {policy['action_type']}: {policy['enabled']}")
             """
             return await self.backend_client._request("GET", f"/gateways/{gateway_id}/apis/{api_id}/security-policies")
+        
+        @self.tool(description="Search gateways using flexible multi-criteria filtering")
+        async def search_gateways(
+            name: Optional[str] = None,
+            vendor: Optional[str] = None,
+            status: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 20
+        ) -> Dict[str, Any]:
+            """Search gateways using flexible multi-criteria filtering.
+            
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_gateways when the query includes:
+            - Text pattern matching (name contains)
+            - Multiple filter combinations (status AND vendor)
+            - Date range filtering (created between dates)
+            
+            Args:
+                name: Gateway name pattern (case-insensitive partial match)
+                vendor: Gateway vendor filter (native, kong, apigee, aws, azure, mulesoft, webmethods)
+                status: Status filter (connected, disconnected, error)
+                created_after: Created after date (ISO 8601 format)
+                created_before: Created before date (ISO 8601 format)
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-100, default: 20)
+            
+            Returns:
+                dict: Search results with:
+                    - items: List of gateway objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
+            
+            Example:
+                >>> result = await search_gateways(
+                ...     name="prod",
+                ...     vendor="kong",
+                ...     status="connected"
+                ... )
+                >>> print(f"Found {result['total']} matching gateways")
+            """
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if name:
+                params["name"] = name
+            if vendor:
+                params["vendor"] = vendor
+            if status:
+                params["status"] = status
+            if created_after:
+                params["created_after"] = created_after
+            if created_before:
+                params["created_before"] = created_before
+            return await self.backend_client._request("GET", "/gateways/search", params=params)
+        
+        @self.tool(description="Search APIs across all gateways using flexible multi-criteria filtering")
+        async def search_all_apis(
+            name: Optional[str] = None,
+            description: Optional[str] = None,
+            status: Optional[str] = None,
+            authentication_type: Optional[str] = None,
+            is_shadow: Optional[bool] = None,
+            health_score_min: Optional[float] = None,
+            health_score_max: Optional[float] = None,
+            gateway_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 20
+        ) -> Dict[str, Any]:
+            """Search APIs across all gateways using flexible multi-criteria filtering.
+            
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_all_apis when the query includes:
+            - Text pattern matching (name/description contains)
+            - Multiple filter combinations (status AND authentication_type AND is_shadow)
+            - Date range filtering (created between dates)
+            - Numeric range filtering (health score thresholds)
+            
+            Args:
+                name: API name pattern (case-insensitive partial match)
+                description: Description pattern (case-insensitive partial match)
+                status: Status filter (active, inactive, deprecated, failed)
+                authentication_type: Authentication type filter
+                is_shadow: Filter shadow APIs (true/false)
+                health_score_min: Minimum health score (0.0-1.0)
+                health_score_max: Maximum health score (0.0-1.0)
+                gateway_id: Optional gateway filter
+                created_after: Created after date (ISO 8601 format)
+                created_before: Created before date (ISO 8601 format)
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-100, default: 20)
+            
+            Returns:
+                dict: Search results with:
+                    - items: List of API objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
+            
+            Example:
+                >>> result = await search_all_apis(
+                ...     name="payment",
+                ...     status="active",
+                ...     health_score_min=0.7,
+                ...     is_shadow=False
+                ... )
+                >>> print(f"Found {result['total']} matching APIs")
+            """
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if name:
+                params["name"] = name
+            if description:
+                params["description"] = description
+            if status:
+                params["status"] = status
+            if authentication_type:
+                params["authentication_type"] = authentication_type
+            if is_shadow is not None:
+                params["is_shadow"] = is_shadow
+            if health_score_min is not None:
+                params["health_score_min"] = health_score_min
+            if health_score_max is not None:
+                params["health_score_max"] = health_score_max
+            if gateway_id:
+                params["gateway_id"] = gateway_id
+            if created_after:
+                params["created_after"] = created_after
+            if created_before:
+                params["created_before"] = created_before
+            return await self.backend_client._request("GET", "/apis/search", params=params)
         
         # ============================================================================
         # METRICS & ANALYTICS (6 tools)
@@ -864,7 +998,7 @@ class UnifiedMCPServer(BaseMCPServer):
             return await self.backend_client._request("GET", f"/gateways/{gateway_id}/metrics/summary", params=params)
         
         # ============================================================================
-        # SECURITY (10 tools)
+        # SECURITY (11 tools - includes 1 search tool)
         # ============================================================================
         
         @self.tool(description="Get security summary with vulnerability counts across all gateways")
@@ -1194,8 +1328,73 @@ class UnifiedMCPServer(BaseMCPServer):
             params = {"api_id": api_id} if api_id else {}
             return await self.backend_client._request("GET", f"/gateways/{gateway_id}/security/posture", params=params)
         
+        @self.tool(description="Search security vulnerabilities using flexible multi-criteria filtering")
+        async def search_vulnerabilities(
+            severity: Optional[str] = None,
+            vulnerability_type: Optional[str] = None,
+            status: Optional[str] = None,
+            api_name: Optional[str] = None,
+            gateway_id: Optional[str] = None,
+            discovered_after: Optional[str] = None,
+            discovered_before: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 100
+        ) -> Dict[str, Any]:
+            """Search security vulnerabilities using flexible multi-criteria filtering.
+            
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_all_vulnerabilities when the query includes:
+            - Text pattern matching (API name contains)
+            - Multiple filter combinations (severity AND type AND status)
+            - Date range filtering (discovered between dates)
+            
+            Args:
+                severity: Severity filter (critical, high, medium, low)
+                vulnerability_type: Type filter (missing_authentication, weak_authorization, etc.)
+                status: Status filter (open, remediated, in_progress, verified)
+                api_name: API name pattern (case-insensitive partial match)
+                gateway_id: Optional gateway filter
+                discovered_after: Discovered after date (ISO 8601 format)
+                discovered_before: Discovered before date (ISO 8601 format)
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-1000, default: 100)
+            
+            Returns:
+                dict: Search results with:
+                    - items: List of vulnerability objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
+            
+            Example:
+                >>> result = await search_vulnerabilities(
+                ...     severity="critical",
+                ...     status="open",
+                ...     discovered_after="2026-01-01T00:00:00Z"
+                ... )
+                >>> print(f"Found {result['total']} critical open vulnerabilities")
+            """
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if severity:
+                params["severity"] = severity
+            if vulnerability_type:
+                params["type"] = vulnerability_type
+            if status:
+                params["status"] = status
+            if api_name:
+                params["api_name"] = api_name
+            if gateway_id:
+                params["gateway_id"] = gateway_id
+            if discovered_after:
+                params["discovered_after"] = discovered_after
+            if discovered_before:
+                params["discovered_before"] = discovered_before
+            return await self.backend_client._request("GET", "/security/vulnerabilities/search", params=params)
+        
         # ============================================================================
-        # COMPLIANCE (5 tools)
+        # COMPLIANCE (6 tools - includes 1 search tool)
         # ============================================================================
         
         @self.tool(description="Scan API for compliance violations across 5 regulatory standards")
@@ -1400,8 +1599,78 @@ class UnifiedMCPServer(BaseMCPServer):
             """
             return await self.backend_client._request("GET", f"/gateways/{gateway_id}/compliance/violations/{violation_id}")
         
+        @self.tool(description="Search compliance violations using flexible multi-criteria filtering")
+        async def search_compliance_violations(
+            standard: Optional[str] = None,
+            violation_type: Optional[str] = None,
+            severity: Optional[str] = None,
+            status: Optional[str] = None,
+            api_name: Optional[str] = None,
+            gateway_id: Optional[str] = None,
+            discovered_after: Optional[str] = None,
+            discovered_before: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 100
+        ) -> Dict[str, Any]:
+            """Search compliance violations using flexible multi-criteria filtering.
+            
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_compliance_violations when the query includes:
+            - Text pattern matching (API name contains)
+            - Multiple filter combinations (standard AND severity AND status)
+            - Date range filtering (discovered between dates)
+            - Standard-specific filtering for audit reports
+            
+            Args:
+                standard: Standard filter (GDPR, HIPAA, SOC2, PCI_DSS, ISO_27001)
+                violation_type: Violation type filter
+                severity: Severity filter (critical, high, medium, low)
+                status: Status filter (open, in_progress, remediated)
+                api_name: API name pattern (case-insensitive partial match)
+                gateway_id: Optional gateway filter
+                discovered_after: Discovered after date (ISO 8601 format)
+                discovered_before: Discovered before date (ISO 8601 format)
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-1000, default: 100)
+            
+            Returns:
+                dict: Search results with:
+                    - items: List of compliance violation objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
+            
+            Example:
+                >>> result = await search_compliance_violations(
+                ...     standard="GDPR",
+                ...     severity="high",
+                ...     status="open"
+                ... )
+                >>> print(f"Found {result['total']} GDPR violations")
+            """
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if standard:
+                params["standard"] = standard
+            if violation_type:
+                params["violation_type"] = violation_type
+            if severity:
+                params["severity"] = severity
+            if status:
+                params["status"] = status
+            if api_name:
+                params["api_name"] = api_name
+            if gateway_id:
+                params["gateway_id"] = gateway_id
+            if discovered_after:
+                params["discovered_after"] = discovered_after
+            if discovered_before:
+                params["discovered_before"] = discovered_before
+            return await self.backend_client._request("GET", "/compliance/violations/search", params=params)
+        
         # ============================================================================
-        # OPTIMIZATION (12 tools)
+        # OPTIMIZATION (13 tools - includes 1 search tool)
         # ============================================================================
         
         @self.tool(description="Generate AI-driven optimization recommendations for an API")
@@ -1725,6 +1994,81 @@ class UnifiedMCPServer(BaseMCPServer):
             params = {"gateway_id": gateway_id} if gateway_id else {}
             return await self.backend_client._request("GET", "/optimization/summary", params=params)
         
+        @self.tool(description="Search optimization recommendations using flexible multi-criteria filtering")
+        async def search_recommendations(
+            recommendation_type: Optional[str] = None,
+            priority: Optional[str] = None,
+            status: Optional[str] = None,
+            impact_min: Optional[float] = None,
+            impact_max: Optional[float] = None,
+            api_name: Optional[str] = None,
+            gateway_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 20
+        ) -> Dict[str, Any]:
+            """Search optimization recommendations using flexible multi-criteria filtering.
+            
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_recommendations when the query includes:
+            - Text pattern matching (API name contains)
+            - Multiple filter combinations (type AND priority AND status)
+            - Date range filtering (created between dates)
+            - Numeric range filtering (impact thresholds)
+            - Implementation status tracking
+            
+            Args:
+                recommendation_type: Type filter (caching, compression, rate_limiting)
+                priority: Priority filter (high, medium, low)
+                status: Status filter (pending, implemented, rejected)
+                impact_min: Minimum expected impact percentage (0-100)
+                impact_max: Maximum expected impact percentage (0-100)
+                api_name: API name pattern (case-insensitive partial match)
+                gateway_id: Optional gateway filter
+                created_after: Created after date (ISO 8601 format)
+                created_before: Created before date (ISO 8601 format)
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-100, default: 20)
+            
+            Returns:
+                dict: Search results with:
+                    - items: List of recommendation objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
+            
+            Example:
+                >>> result = await search_recommendations(
+                ...     priority="high",
+                ...     status="pending",
+                ...     impact_min=20.0
+                ... )
+                >>> print(f"Found {result['total']} high-priority recommendations")
+            """
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if recommendation_type:
+                params["type"] = recommendation_type
+            if priority:
+                params["priority"] = priority
+            if status:
+                params["status"] = status
+            if impact_min is not None:
+                params["impact_min"] = impact_min
+            if impact_max is not None:
+                params["impact_max"] = impact_max
+            if api_name:
+                params["api_name"] = api_name
+            if gateway_id:
+                params["gateway_id"] = gateway_id
+            if created_after:
+                params["created_after"] = created_after
+            if created_before:
+                params["created_before"] = created_before
+            return await self.backend_client._request("GET", "/optimization/recommendations/search", params=params)
+        
         # ============================================================================
         # RATE LIMITING (8 tools)
         # ============================================================================
@@ -1970,7 +2314,7 @@ class UnifiedMCPServer(BaseMCPServer):
             )
         
         # ============================================================================
-        # PREDICTIONS (5 tools)
+        # PREDICTIONS (6 tools - includes 1 search tool)
         # ============================================================================
         
         @self.tool(description="List failure predictions for a gateway")
@@ -2118,199 +2462,80 @@ class UnifiedMCPServer(BaseMCPServer):
             params = {"gateway_id": gateway_id} if gateway_id else {}
             return await self.backend_client._request("GET", "/predictions", params=params)
         
-        # ============================================================================
-        # NATURAL LANGUAGE QUERIES (7 tools)
-        # ============================================================================
-        
-        @self.tool(description="Execute natural language query across all data")
-        async def execute_query(
-            query_text: str,
-            session_id: Optional[str] = None
-        ) -> Dict[str, Any]:
-            """Execute natural language query.
-            
-            Processes a natural language query and returns results with
-            AI-generated response. Supports complex queries across APIs,
-            metrics, security, compliance, and more.
-            
-            Args:
-                query_text: Natural language query (1-5000 characters)
-                session_id: Optional conversation session ID for context
-            
-            Returns:
-                dict: Query results with:
-                    - query_id: Query identifier
-                    - query_text: Original query
-                    - response_text: Natural language answer
-                    - confidence_score: Confidence (0-1)
-                    - results: Structured query results
-                    - follow_up_queries: Suggested follow-ups
-                    - execution_time_ms: Execution time
-            
-            Example:
-                >>> result = await execute_query(
-                ...     query_text="Show me APIs with high error rates in the last 24 hours"
-                ... )
-                >>> print(result['response_text'])
-                >>> for suggestion in result['follow_up_queries']:
-                ...     print(f"  - {suggestion}")
-            """
-            payload = {"query_text": query_text}
-            if session_id:
-                payload["session_id"] = session_id
-            return await self.backend_client._request("POST", "/query", json=payload)
-        
-        @self.tool(description="Create new query session for conversation context")
-        async def create_query_session(
-            user_id: Optional[str] = None
-        ) -> Dict[str, Any]:
-            """Create query session.
-            
-            Creates a new conversation session for maintaining context across
-            multiple natural language queries.
-            
-            Args:
-                user_id: Optional user identifier
-            
-            Returns:
-                dict: New session with:
-                    - session_id: Session UUID
-                    - created_at: Creation timestamp
-            
-            Example:
-                >>> session = await create_query_session(user_id="user123")
-                >>> session_id = session['session_id']
-                >>> # Use session_id in subsequent queries
-            """
-            payload = {}
-            if user_id:
-                payload["user_id"] = user_id
-            return await self.backend_client._request("POST", "/query/session/new", json=payload)
-        
-        @self.tool(description="Get query by ID")
-        async def get_query(query_id: str) -> Dict[str, Any]:
-            """Get query details.
-            
-            Retrieves complete information about a previously executed query.
-            
-            Args:
-                query_id: Query UUID
-            
-            Returns:
-                dict: Complete query object
-            
-            Example:
-                >>> query = await get_query(
-                ...     query_id="cc0e8400-e29b-41d4-a716-446655440007"
-                ... )
-            """
-            return await self.backend_client._request("GET", f"/query/{query_id}")
-        
-        @self.tool(description="Get queries for a session")
-        async def get_session_queries(
-            session_id: str,
+        @self.tool(description="Search failure predictions using flexible multi-criteria filtering")
+        async def search_predictions(
+            prediction_type: Optional[str] = None,
+            confidence_min: Optional[float] = None,
+            confidence_max: Optional[float] = None,
+            severity: Optional[str] = None,
+            status: Optional[str] = None,
+            predicted_after: Optional[str] = None,
+            predicted_before: Optional[str] = None,
+            api_name: Optional[str] = None,
+            gateway_id: Optional[str] = None,
             page: int = 1,
-            page_size: int = 50
+            page_size: int = 20
         ) -> Dict[str, Any]:
-            """Get session queries.
+            """Search failure predictions using flexible multi-criteria filtering.
             
-            Retrieves all queries for a specific conversation session.
+            Use this tool when the user's query requires combining multiple filters
+            that go beyond simple list operations.
+            
+            IMPORTANT: Prefer this tool over list_predictions when the query includes:
+            - Text pattern matching (API name contains)
+            - Multiple filter combinations (type AND severity AND status)
+            - Date range filtering (predicted between dates)
+            - Numeric range filtering (confidence thresholds)
+            - Time range filtering patterns
             
             Args:
-                session_id: Session UUID
-                page: Page number (1-indexed, default: 1)
-                page_size: Items per page (1-100, default: 50)
+                prediction_type: Type filter (failure, performance_degradation, capacity_issue)
+                confidence_min: Minimum confidence score (0.0-1.0)
+                confidence_max: Maximum confidence score (0.0-1.0)
+                severity: Severity filter (critical, high, medium, low)
+                status: Status filter (active, resolved, false_positive, expired)
+                predicted_after: Predicted after date (ISO 8601 format)
+                predicted_before: Predicted before date (ISO 8601 format)
+                api_name: API name pattern (case-insensitive partial match)
+                gateway_id: Optional gateway filter
+                page: Page number (1-based, default: 1)
+                page_size: Items per page (1-100, default: 20)
             
             Returns:
-                dict: Paginated queries list
+                dict: Search results with:
+                    - items: List of prediction objects
+                    - total: Total matching count
+                    - page: Current page number
+                    - page_size: Items per page
             
             Example:
-                >>> queries = await get_session_queries(
-                ...     session_id="dd0e8400-e29b-41d4-a716-446655440008"
+                >>> result = await search_predictions(
+                ...     confidence_min=0.8,
+                ...     severity="critical",
+                ...     status="active"
                 ... )
+                >>> print(f"Found {result['total']} high-confidence predictions")
             """
-            params = {"page": page, "page_size": page_size}
-            return await self.backend_client._request("GET", f"/query/session/{session_id}", params=params)
-        
-        @self.tool(description="Get recent queries")
-        async def get_recent_queries(
-            user_id: Optional[str] = None,
-            hours: int = 24,
-            size: int = 20
-        ) -> Dict[str, Any]:
-            """Get recent queries.
-            
-            Retrieves recent queries, optionally filtered by user.
-            
-            Args:
-                user_id: Optional user filter
-                hours: Hours to look back (default: 24)
-                size: Maximum results (default: 20)
-            
-            Returns:
-                list: Recent query objects
-            
-            Example:
-                >>> queries = await get_recent_queries(hours=48, size=10)
-            """
-            params: Dict[str, Any] = {"hours": hours, "size": size}
-            if user_id:
-                params["user_id"] = user_id
-            return await self.backend_client._request("GET", "/query/recent", params=params)
-        
-        @self.tool(description="Submit feedback on query result")
-        async def submit_query_feedback(
-            query_id: str,
-            feedback: str,
-            comment: Optional[str] = None
-        ) -> Dict[str, Any]:
-            """Submit query feedback.
-            
-            Provides feedback on a query result to improve future responses.
-            
-            Args:
-                query_id: Query UUID
-                feedback: Feedback type (helpful, not_helpful, incorrect)
-                comment: Optional feedback comment (max 1000 characters)
-            
-            Returns:
-                dict: Updated query object
-            
-            Example:
-                >>> result = await submit_query_feedback(
-                ...     query_id="cc0e8400-e29b-41d4-a716-446655440007",
-                ...     feedback="helpful",
-                ...     comment="Very accurate results"
-                ... )
-            """
-            payload = {"feedback": feedback}
-            if comment:
-                payload["comment"] = comment
-            return await self.backend_client._request("POST", f"/query/{query_id}/feedback", json=payload)
-        
-        @self.tool(description="Get query statistics")
-        async def get_query_statistics(
-            session_id: Optional[str] = None,
-            hours: int = 24
-        ) -> Dict[str, Any]:
-            """Get query statistics.
-            
-            Retrieves query analytics and statistics.
-            
-            Args:
-                session_id: Optional session filter
-                hours: Hours to look back (default: 24)
-            
-            Returns:
-                dict: Query statistics
-            
-            Example:
-                >>> stats = await get_query_statistics(hours=168)
-            """
-            params: Dict[str, Any] = {"hours": hours}
-            if session_id:
-                params["session_id"] = session_id
-            return await self.backend_client._request("GET", "/query/statistics", params=params)
+            params: Dict[str, Any] = {"page": page, "page_size": page_size}
+            if prediction_type:
+                params["prediction_type"] = prediction_type
+            if confidence_min is not None:
+                params["confidence_min"] = confidence_min
+            if confidence_max is not None:
+                params["confidence_max"] = confidence_max
+            if severity:
+                params["severity"] = severity
+            if status:
+                params["status"] = status
+            if predicted_after:
+                params["predicted_after"] = predicted_after
+            if predicted_before:
+                params["predicted_before"] = predicted_before
+            if api_name:
+                params["api_name"] = api_name
+            if gateway_id:
+                params["gateway_id"] = gateway_id
+            return await self.backend_client._request("GET", "/predictions/search", params=params)
 
     async def cleanup(self) -> None:
         """Cleanup server resources."""

@@ -5,11 +5,12 @@ Provides CRUD operations and specialized queries for API entities.
 """
 
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from uuid import UUID
 
 from app.db.repositories.base import BaseRepository
-from app.models.base.api import API, APIStatus, DiscoveryMethod, PolicyAction, PolicyActionType
+from app.models.base.api import API, APIStatus, AuthenticationType, DiscoveryMethod, PolicyAction, PolicyActionType
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +524,154 @@ class APIRepository(BaseRepository[API]):
         except Exception as e:
             logger.error(f"Failed to get API statistics: {e}")
             raise
+
+
+    def search_apis(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        status: Optional[APIStatus] = None,
+        authentication_type: Optional[AuthenticationType] = None,
+        is_shadow: Optional[bool] = None,
+        health_score_min: Optional[float] = None,
+        health_score_max: Optional[float] = None,
+        gateway_id: Optional[UUID] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[List[API], int]:
+        """
+        Search APIs with multiple filter criteria.
+        
+        This method provides flexible multi-criteria filtering for agents,
+        complementing existing list/get methods with text pattern matching,
+        health score ranges, and date filtering.
+        
+        Args:
+            name: API name pattern (case-insensitive wildcard match)
+            description: Description pattern (case-insensitive text search)
+            status: API status filter
+            authentication_type: Authentication type filter
+            is_shadow: Filter for shadow APIs (True/False/None for all)
+            health_score_min: Minimum health score (0.0-1.0)
+            health_score_max: Maximum health score (0.0-1.0)
+            gateway_id: Filter by gateway ID
+            created_after: Filter APIs created after this date
+            created_before: Filter APIs created before this date
+            page: Page number (1-based)
+            page_size: Number of results per page (default: 20, max: 100)
+            
+        Returns:
+            Tuple of (list of APIs, total count)
+            
+        Examples:
+            # Find APIs with "payment" in name that have authentication enabled
+            apis, total = repo.search_apis(
+                name="payment",
+                authentication_type=AuthenticationType.OAUTH2
+            )
+            
+            # Find shadow APIs with low health scores
+            apis, total = repo.search_apis(
+                is_shadow=True,
+                health_score_max=0.5
+            )
+        """
+        # Validate and normalize pagination
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        from_ = (page - 1) * page_size
+        
+        # Validate health score ranges
+        if health_score_min is not None:
+            health_score_min = max(0.0, min(1.0, health_score_min))
+        if health_score_max is not None:
+            health_score_max = max(0.0, min(1.0, health_score_max))
+        
+        # Build bool query with must clauses
+        must_clauses = []
+        
+        # Name filter (case-insensitive wildcard)
+        if name:
+            must_clauses.append({
+                "wildcard": {
+                    "name": {
+                        "value": f"*{name.lower()}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
+        
+        # Description filter (text search)
+        if description:
+            must_clauses.append({
+                "match": {
+                    "description": {
+                        "query": description,
+                        "operator": "and"
+                    }
+                }
+            })
+        
+        # Status filter
+        if status:
+            status_value = status.value if isinstance(status, APIStatus) else status
+            must_clauses.append({
+                "term": {"status": status_value}
+            })
+        
+        # Authentication type filter
+        if authentication_type:
+            auth_value = authentication_type.value if isinstance(authentication_type, AuthenticationType) else authentication_type
+            must_clauses.append({
+                "term": {"authentication.type": auth_value}
+            })
+        
+        # Shadow API filter
+        if is_shadow is not None:
+            must_clauses.append({
+                "term": {"intelligence_metadata.is_shadow": is_shadow}
+            })
+        
+        # Health score range
+        if health_score_min is not None or health_score_max is not None:
+            range_query: Dict[str, Any] = {}
+            if health_score_min is not None:
+                range_query["gte"] = health_score_min
+            if health_score_max is not None:
+                range_query["lte"] = health_score_max
+            must_clauses.append({
+                "range": {"intelligence_metadata.health_score": range_query}
+            })
+        
+        # Gateway filter
+        if gateway_id:
+            must_clauses.append({
+                "term": {"gateway_id": str(gateway_id)}
+            })
+        
+        # Date range filters
+        if created_after or created_before:
+            date_range_query: Dict[str, Any] = {}
+            if created_after:
+                date_range_query["gte"] = created_after.isoformat()
+            if created_before:
+                date_range_query["lte"] = created_before.isoformat()
+            must_clauses.append({
+                "range": {"created_at": date_range_query}
+            })
+        
+        # Build final query
+        query = {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}]
+            }
+        }
+        
+        # Execute search with sorting by created_at (newest first)
+        sort = [{"created_at": {"order": "desc"}}]
+        return self.search(query, size=page_size, from_=from_, sort=sort)
 
 
 # Made with Bob

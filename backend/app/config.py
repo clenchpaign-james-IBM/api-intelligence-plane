@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     
     # LLM Provider Settings
     LLM_PROVIDER: str = Field(
-        default="openai", description="LLM provider (openai, anthropic, ollama, etc.)"
+        default="openai", description="LLM provider (openai, anthropic, google, azure, ollama, watsonx, etc.)"
     )
     LLM_MODEL: str = Field(
         default="gpt-4", description="Default LLM model to use"
@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     )
     LLM_MAX_TOKENS: int = Field(
         default=2000, description="Maximum tokens for LLM responses"
+    )
+    
+    # Agent Execution Settings (to prevent infinite loops)
+    AGENT_MAX_ITERATIONS: int = Field(
+        default=15, description="Maximum tool calling iterations per agent execution"
+    )
+    AGENT_MAX_EXECUTION_TIME: int = Field(
+        default=30, description="Maximum execution time in seconds per agent"
     )
     
     # OpenAI Settings
@@ -109,6 +117,23 @@ class Settings(BaseSettings):
     AGENT_MAX_RESULTS: int = Field(
         default=3, description="Maximum number of results to enhance with agents"
     )
+    # Agentic Query Fallback Settings (T073)
+    FALLBACK_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.1, description="Minimum confidence score before triggering fallback"
+    )
+    FALLBACK_FAILURE_RATE_THRESHOLD: float = Field(
+        default=0.1, description="Maximum tool failure rate before triggering fallback"
+    )
+    FALLBACK_TIMEOUT_SECONDS: float = Field(
+        default=10.0, description="Maximum workflow execution time before triggering fallback"
+    )
+    FALLBACK_ALERT_RATE_THRESHOLD: float = Field(
+        default=0.1, description="Fallback rate threshold for triggering monitoring alerts (20%)"
+    )
+    FALLBACK_ALERT_ENABLED: bool = Field(
+        default=True, description="Enable fallback rate monitoring alerts"
+    )
+    
     
     # Optimization AI Settings
     OPTIMIZATION_AI_ENABLED: bool = Field(
@@ -123,7 +148,18 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT: Optional[str] = Field(
         default=None, description="Azure OpenAI deployment name"
     )
-    
+
+    # IBM watsonx Settings
+    WATSONX_API_KEY: Optional[str] = Field(
+        default=None, description="IBM watsonx API key"
+    )
+    WATSONX_URL: Optional[str] = Field(
+        default=None, description="IBM watsonx base URL"
+    )
+    WATSONX_PROJECT_ID: Optional[str] = Field(
+        default=None, description="IBM watsonx project ID"
+    )
+
     # Ollama Settings
     OLLAMA_BASE_URL: str = Field(
         default="http://localhost:11434", description="Ollama base URL"
@@ -134,13 +170,16 @@ class Settings(BaseSettings):
         default=True, description="Enable background scheduler"
     )
     API_DISCOVERY_INTERVAL_MINUTES: int = Field(
-        default=1, description="API discovery interval in minutes per gateway"
+        default=5, description="API discovery interval in minutes per gateway"
     )
     METRICS_INTERVAL_MINUTES: int = Field(
-        default=2, description="Metrics collection interval in minutes"
+        default=5, description="Metrics collection interval in minutes"
     )
     SECURITY_SCAN_INTERVAL_MINUTES: int = Field(
         default=1, description="Security scan interval in minutes"
+    )
+    COMPLIANCE_SCAN_INTERVAL_MINUTES: int = Field(
+        default=1, description="Compliance scan interval in minutes"
     )
     PREDICTION_INTERVAL_MINUTES: int = Field(
         default=1, description="Prediction generation interval in minutes"
@@ -149,10 +188,10 @@ class Settings(BaseSettings):
         default=1, description="Optimization analysis interval in minutes"
     )
     TRANSACTIONAL_LOGS_INTERVAL_MINUTES: int = Field(
-        default=1, description="Transactional logs collection interval in minutes per gateway"
+        default=5, description="Transactional logs collection interval in minutes per gateway"
     )
     METRICS_AGGREGATION_BUCKET: str = Field(
-        default="1m", description="Default time bucket for metrics aggregation (1m, 5m, 1h, 1d)"
+        default="5m", description="Default time bucket for metrics aggregation (1m, 5m, 1h, 1d)"
     )
     
     # TLS/SSL Settings

@@ -5,6 +5,7 @@ REST API endpoints for API failure predictions.
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from app.db.repositories.prediction_repository import PredictionRepository
 from app.db.repositories.metrics_repository import MetricsRepository
 from app.db.repositories.api_repository import APIRepository
-from app.models.prediction import PredictionSeverity, PredictionStatus
+from app.models.prediction import PredictionSeverity, PredictionStatus, PredictionType
 
 logger = logging.getLogger(__name__)
 
@@ -561,5 +562,144 @@ async def get_gateway_prediction_explanation(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get prediction explanation: {str(e)}",
         )
+
+@router.get(
+    "/predictions/search",
+    response_model=PredictionListResponse,
+    summary="Search failure predictions with multiple filters",
+    description="Search failure predictions across all gateways with flexible multi-criteria filtering",
+)
+async def search_predictions(
+    prediction_type: Optional[PredictionType] = Query(None, description="Filter by prediction type (failure, degradation, capacity, security)"),
+    confidence_min: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum confidence score (0.0-1.0)"),
+    confidence_max: Optional[float] = Query(None, ge=0.0, le=1.0, description="Maximum confidence score (0.0-1.0)"),
+    severity: Optional[PredictionSeverity] = Query(None, description="Filter by severity"),
+    pred_status: Optional[PredictionStatus] = Query(None, alias="status", description="Filter by status"),
+    predicted_after: Optional[datetime] = Query(None, description="Filter predictions made after this date (ISO 8601)"),
+    predicted_before: Optional[datetime] = Query(None, description="Filter predictions made before this date (ISO 8601)"),
+    api_name: Optional[str] = Query(None, description="Filter by API name pattern (case-insensitive wildcard)"),
+    gateway_id: Optional[UUID] = Query(None, description="Filter by gateway ID"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size (max 100)"),
+) -> PredictionListResponse:
+    """
+    Search failure predictions with multiple filters.
+    
+    Supports flexible filtering by:
+    - Prediction type (failure, degradation, capacity, security)
+    - Confidence score range (0.0-1.0)
+    - Severity (critical, high, medium, low)
+    - Status (pending, confirmed, false_positive, resolved)
+    - Prediction date range
+    - API name pattern (case-insensitive wildcard search)
+    - Gateway ID
+    
+    All filters are optional and combined with AND logic.
+    Results are paginated with configurable page size (max 100).
+    
+    Args:
+        prediction_type: Optional prediction type filter
+        confidence_min: Optional minimum confidence score
+        confidence_max: Optional maximum confidence score
+        severity: Optional severity filter
+        pred_status: Optional status filter
+        predicted_after: Optional start date for prediction range
+        predicted_before: Optional end date for prediction range
+        api_name: Optional API name pattern (case-insensitive)
+        gateway_id: Optional gateway ID filter
+        page: Page number (1-based)
+        page_size: Number of items per page (max 100)
+        
+    Returns:
+        Paginated list of predictions matching filters
+        
+    Raises:
+        HTTPException: If search fails
+    """
+    try:
+        logger.info(
+            f"Searching predictions: type={prediction_type}, confidence_min={confidence_min}, "
+            f"confidence_max={confidence_max}, severity={severity}, status={pred_status}, "
+            f"predicted_after={predicted_after}, predicted_before={predicted_before}, "
+            f"api_name={api_name}, gateway_id={gateway_id}, page={page}, page_size={page_size}"
+        )
+        
+        prediction_repo = PredictionRepository()
+        
+        # Call repository search method
+        predictions, total = prediction_repo.search_predictions(
+            prediction_type=prediction_type,
+            confidence_min=confidence_min,
+            confidence_max=confidence_max,
+            severity=severity,
+            status=pred_status,
+            predicted_after=predicted_after,
+            predicted_before=predicted_before,
+            api_name=api_name,
+            gateway_id=gateway_id,
+            page=page,
+            page_size=page_size,
+        )
+        
+        logger.info(f"Found {total} predictions matching search criteria")
+        
+        # Convert to response models
+        api_repo = APIRepository()
+        prediction_responses = []
+        
+        for pred in predictions:
+            # Get API name
+            api = api_repo.get(str(pred.api_id))
+            api_name_str = api.name if api else "Unknown"
+            
+            # Convert contributing factors
+            contributing_factors = [
+                ContributingFactorResponse(
+                    factor=cf.factor,
+                    current_value=cf.current_value,
+                    threshold=cf.threshold,
+                    trend=cf.trend,
+                    weight=cf.weight,
+                )
+                for cf in pred.contributing_factors
+            ]
+            
+            prediction_responses.append(
+                PredictionResponse(
+                    id=str(pred.id),
+                    api_id=str(pred.api_id),
+                    api_name=api_name_str,
+                    prediction_type=pred.prediction_type.value,
+                    predicted_at=pred.predicted_at.isoformat(),
+                    predicted_time=pred.predicted_time.isoformat(),
+                    confidence_score=pred.confidence_score,
+                    severity=pred.severity.value,
+                    status=pred.status.value,
+                    contributing_factors=contributing_factors,
+                    recommended_actions=pred.recommended_actions,
+                    actual_outcome=pred.actual_outcome,
+                    actual_time=pred.actual_time.isoformat() if pred.actual_time else None,
+                    accuracy_score=pred.accuracy_score,
+                    model_version=pred.model_version,
+                    metadata=pred.metadata,
+                    created_at=pred.created_at.isoformat(),
+                    updated_at=pred.updated_at.isoformat(),
+                )
+            )
+        
+        return PredictionListResponse(
+            predictions=prediction_responses,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to search predictions: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search predictions: {str(e)}",
+        )
+
 
 # Made with Bob

@@ -5,6 +5,7 @@ Provides CRUD operations and specialized queries for Gateway entities.
 """
 
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from uuid import UUID
 
@@ -386,6 +387,102 @@ class GatewayRepository(BaseRepository[Gateway]):
         except Exception as e:
             logger.error(f"Failed to get gateway statistics: {e}")
             raise
+    
+    def search_gateways(
+        self,
+        name: Optional[str] = None,
+        vendor: Optional[GatewayVendor] = None,
+        status: Optional[GatewayStatus] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[List[Gateway], int]:
+        """
+        Search gateways with multiple filter criteria.
+        
+        This method provides flexible multi-criteria filtering for agents,
+        complementing the existing list/get methods with text pattern matching
+        and date range filtering.
+        
+        Args:
+            name: Gateway name pattern (case-insensitive wildcard match)
+            vendor: Gateway vendor filter
+            status: Gateway status filter
+            created_after: Filter gateways created after this date
+            created_before: Filter gateways created before this date
+            page: Page number (1-based)
+            page_size: Number of results per page (default: 20, max: 100)
+            
+        Returns:
+            Tuple of (list of gateways, total count)
+            
+        Examples:
+            # Find gateways with "prod" in name that are connected
+            gateways, total = repo.search(name="prod", status=GatewayStatus.CONNECTED)
+            
+            # Find webMethods gateways created in last 7 days
+            from datetime import datetime, timedelta
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            gateways, total = repo.search(
+                vendor=GatewayVendor.WEBMETHODS,
+                created_after=week_ago
+            )
+        """
+        # Validate and normalize pagination
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        from_ = (page - 1) * page_size
+        
+        # Build bool query with must clauses
+        must_clauses = []
+        
+        # Name filter (case-insensitive wildcard)
+        if name:
+            must_clauses.append({
+                "wildcard": {
+                    "name": {
+                        "value": f"*{name.lower()}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
+        
+        # Vendor filter
+        if vendor:
+            vendor_value = vendor.value if isinstance(vendor, GatewayVendor) else vendor
+            must_clauses.append({
+                "term": {"vendor": vendor_value}
+            })
+        
+        # Status filter
+        if status:
+            status_value = status.value if isinstance(status, GatewayStatus) else status
+            must_clauses.append({
+                "term": {"status": status_value}
+            })
+        
+        # Date range filters
+        if created_after or created_before:
+            range_query: Dict[str, Any] = {}
+            if created_after:
+                range_query["gte"] = created_after.isoformat()
+            if created_before:
+                range_query["lte"] = created_before.isoformat()
+            must_clauses.append({
+                "range": {"created_at": range_query}
+            })
+        
+        # Build final query
+        query = {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}]
+            }
+        }
+        
+        # Execute search with sorting by created_at (newest first)
+        sort = [{"created_at": {"order": "desc"}}]
+        return super().search(query, size=page_size, from_=from_, sort=sort)
 
 
 # Made with Bob

@@ -84,6 +84,15 @@ class SecuritySummaryResponse(BaseModel):
     low_vulnerabilities: int
 
 
+class VulnerabilityListResponse(BaseModel):
+    """Response model for listing vulnerabilities."""
+    
+    items: List[Vulnerability]
+    total: int
+    page: int
+    page_size: int
+
+
 # API Endpoints
 @router.get(
     "/security/summary",
@@ -811,6 +820,90 @@ async def get_gateway_security_posture(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch security posture: {str(e)}",
         )
+
+@router.get(
+    "/vulnerabilities/search",
+    response_model=VulnerabilityListResponse,
+    summary="Search vulnerabilities with multiple filters",
+)
+async def search_vulnerabilities(
+    severity: Optional[str] = Query(None, description="Vulnerability severity (critical, high, medium, low)"),
+    type: Optional[str] = Query(None, description="Vulnerability type filter"),
+    vuln_status: Optional[VulnerabilityStatus] = Query(None, alias="status", description="Vulnerability status filter"),
+    api_name: Optional[str] = Query(None, description="API name pattern (case-insensitive wildcard)"),
+    gateway_id: Optional[UUID] = Query(None, description="Filter by gateway ID"),
+    discovered_after: Optional[str] = Query(None, description="Filter vulnerabilities discovered after this date (ISO 8601)"),
+    discovered_before: Optional[str] = Query(None, description="Filter vulnerabilities discovered before this date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+) -> VulnerabilityListResponse:
+    """
+    Search vulnerabilities with multiple filter criteria.
+    
+    This endpoint provides flexible multi-criteria filtering for agents,
+    complementing existing list/get methods with severity, type, status,
+    and date range filtering.
+    
+    Args:
+        severity: Vulnerability severity (critical, high, medium, low)
+        type: Vulnerability type filter
+        vuln_status: Vulnerability status filter
+        api_name: API name pattern (case-insensitive wildcard match)
+        gateway_id: Filter by gateway ID
+        discovered_after: Filter vulnerabilities discovered after this date
+        discovered_before: Filter vulnerabilities discovered before this date
+        page: Page number (1-based)
+        page_size: Number of items per page
+        
+    Returns:
+        Paginated list of matching vulnerabilities
+        
+    Examples:
+        - Find critical vulnerabilities this month affecting APIs with "user":
+          GET /api/v1/security/vulnerabilities/search?severity=critical&api_name=user&discovered_after=2026-04-01T00:00:00Z
+    """
+    try:
+        from datetime import datetime
+        from app.db.repositories.vulnerability_repository import VulnerabilityRepository
+        
+        repo = VulnerabilityRepository()
+        
+        # Parse datetime strings if provided
+        discovered_after_dt = datetime.fromisoformat(discovered_after.replace('Z', '+00:00')) if discovered_after else None
+        discovered_before_dt = datetime.fromisoformat(discovered_before.replace('Z', '+00:00')) if discovered_before else None
+        
+        # Call repository search method
+        vulnerabilities, total = repo.search_vulnerabilities(
+            severity=severity,
+            type=type,
+            status=vuln_status,
+            api_name=api_name,
+            gateway_id=gateway_id,
+            discovered_after=discovered_after_dt,
+            discovered_before=discovered_before_dt,
+            page=page,
+            page_size=page_size,
+        )
+        
+        return VulnerabilityListResponse(
+            items=vulnerabilities,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}. Use ISO 8601 format (e.g., 2026-04-25T00:00:00Z)"
+        )
+    except Exception as e:
+        logger.error(f"Failed to search vulnerabilities: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search vulnerabilities: {str(e)}",
+        )
+
 
 
 # Made with Bob

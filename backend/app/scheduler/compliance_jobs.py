@@ -53,7 +53,7 @@ class ComplianceScheduler:
 
         self.scheduler.add_job(
             func=self._run_compliance_scan,
-            trigger=IntervalTrigger(minutes=1),
+            trigger=IntervalTrigger(minutes=self.settings.COMPLIANCE_SCAN_INTERVAL_MINUTES),
             id="compliance_scan",
             name="Daily Compliance Scan - All APIs",
             replace_existing=True,

@@ -464,4 +464,153 @@ class PredictionRepository(BaseRepository[Prediction]):
 
         return result.get("deleted", 0)
 
+    def search_predictions(
+        self,
+        prediction_type: Optional[PredictionType] = None,
+        confidence_min: Optional[float] = None,
+        confidence_max: Optional[float] = None,
+        severity: Optional[PredictionSeverity] = None,
+        status: Optional[PredictionStatus] = None,
+        predicted_after: Optional[datetime] = None,
+        predicted_before: Optional[datetime] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[UUID] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[List[Prediction], int]:
+        """
+        Search predictions with multiple filter criteria.
+        
+        This method provides flexible multi-criteria filtering for agents,
+        complementing existing list/get methods with prediction type, confidence
+        range, severity, and time range filtering.
+        
+        Args:
+            prediction_type: Prediction type filter (failure, degradation, capacity, security)
+            confidence_min: Minimum confidence score (0.0-1.0)
+            confidence_max: Maximum confidence score (0.0-1.0)
+            severity: Prediction severity filter (critical, high, medium, low)
+            status: Prediction status filter (active, resolved, false_positive, expired)
+            predicted_after: Filter predictions with predicted_time after this date
+            predicted_before: Filter predictions with predicted_time before this date
+            api_name: API name pattern (case-insensitive wildcard match)
+            gateway_id: Filter by gateway ID
+            page: Page number (1-based)
+            page_size: Number of results per page (default: 20, max: 100)
+            
+        Returns:
+            Tuple of (list of predictions, total count)
+            
+        Examples:
+            # Show predictions with confidence >80% for production gateway
+            preds, total = repo.search_predictions(
+                confidence_min=0.8,
+                gateway_id=UUID("...")
+            )
+            
+            # Find failure predictions in next hour
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            hour_later = now + timedelta(hours=1)
+            preds, total = repo.search_predictions(
+                prediction_type=PredictionType.FAILURE,
+                predicted_after=now,
+                predicted_before=hour_later
+            )
+        """
+        # Validate and normalize pagination
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        from_ = (page - 1) * page_size
+        
+        # Validate confidence ranges
+        if confidence_min is not None:
+            confidence_min = max(0.0, min(1.0, confidence_min))
+        if confidence_max is not None:
+            confidence_max = max(0.0, min(1.0, confidence_max))
+        
+        # Build bool query with must clauses
+        must_clauses = []
+        
+        # Prediction type filter
+        if prediction_type:
+            type_value = prediction_type.value if isinstance(prediction_type, PredictionType) else prediction_type
+            must_clauses.append({
+                "term": {"prediction_type": type_value}
+            })
+        
+        # Confidence range
+        if confidence_min is not None or confidence_max is not None:
+            range_query: Dict[str, Any] = {}
+            if confidence_min is not None:
+                range_query["gte"] = confidence_min
+            if confidence_max is not None:
+                range_query["lte"] = confidence_max
+            must_clauses.append({
+                "range": {"confidence_score": range_query}
+            })
+        
+        # Severity filter
+        if severity:
+            severity_value = severity.value if isinstance(severity, PredictionSeverity) else severity
+            must_clauses.append({
+                "term": {"severity": severity_value}
+            })
+        
+        # Status filter
+        if status:
+            status_value = status.value if isinstance(status, PredictionStatus) else status
+            must_clauses.append({
+                "term": {"status": status_value}
+            })
+        
+        # Predicted time range filters
+        if predicted_after or predicted_before:
+            time_range_query: Dict[str, Any] = {}
+            if predicted_after:
+                time_range_query["gte"] = predicted_after.isoformat()
+            if predicted_before:
+                time_range_query["lte"] = predicted_before.isoformat()
+            must_clauses.append({
+                "range": {"predicted_time": time_range_query}
+            })
+        
+        # API name filter (case-insensitive wildcard)
+        if api_name:
+            must_clauses.append({
+                "wildcard": {
+                    "api_name": {
+                        "value": f"*{api_name.lower()}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
+        
+        # Gateway filter
+        if gateway_id:
+            must_clauses.append({
+                "term": {"gateway_id": str(gateway_id)}
+            })
+        
+        # Build final query
+        query = {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}]
+            }
+        }
+        
+        # Execute search with sorting by severity (critical first) and predicted_time (soonest first)
+        sort = [
+            {"severity": {"order": "asc"}},  # critical < high < medium < low
+            {"predicted_time": {"order": "asc"}}  # soonest first
+        ]
+        
+        try:
+            predictions, total = self.search(query, size=page_size, from_=from_, sort=sort)
+            return predictions, total
+        except Exception as e:
+            logger.error(f"Failed to search predictions: {e}")
+            return [], 0
+
+
 # Made with Bob

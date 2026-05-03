@@ -3,6 +3,7 @@
 Provides CRUD operations and queries for compliance violations.
 """
 
+import logging
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -145,6 +146,80 @@ class ComplianceRepository(BaseRepository[ComplianceViolation]):
         return [
             self.model_class(**hit["_source"]) for hit in response["hits"]["hits"]
         ]
+
+    async def mark_undetected_as_resolved(
+        self,
+        gateway_id: UUID,
+        api_id: UUID,
+        detected_violation_ids: list[UUID],
+        scan_time: datetime,
+    ) -> int:
+        """Mark violations not in detected list as resolved.
+        
+        This method finds all OPEN violations for an API that were NOT
+        detected in the current scan and marks them as RESOLVED.
+        
+        Args:
+            gateway_id: Gateway identifier
+            api_id: API identifier
+            detected_violation_ids: List of violation IDs found in current scan
+            scan_time: Timestamp of the scan
+            
+        Returns:
+            Number of violations marked as resolved
+        """
+        # Build query for OPEN violations not in detected list
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"gateway_id": str(gateway_id)}},
+                    {"term": {"api_id": str(api_id)}},
+                    {"term": {"status": ComplianceStatus.OPEN.value}},
+                ],
+                "must_not": [
+                    {"terms": {"id.keyword": [str(vid) for vid in detected_violation_ids]}}
+                ] if detected_violation_ids else []
+            }
+        }
+        
+        # Update script to mark as resolved
+        script = {
+            "source": """
+                ctx._source.status = params.status;
+                ctx._source.resolved_at = params.resolved_at;
+                ctx._source.updated_at = params.updated_at;
+            """,
+            "params": {
+                "status": ComplianceStatus.REMEDIATED.value,
+                "resolved_at": scan_time.isoformat(),
+                "updated_at": scan_time.isoformat(),
+            }
+        }
+        
+        body = {
+            "query": query,
+            "script": script,
+        }
+        
+        try:
+            response = self.client.update_by_query(
+                index=self.index_name,
+                body=body,
+            )
+            # Refresh index after update
+            self.client.indices.refresh(index=self.index_name)
+            updated_count = response.get("updated", 0)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Marked {updated_count} violations as resolved for API {api_id} in gateway {gateway_id}"
+            )
+            return updated_count
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to mark violations as resolved: {e}")
+            return 0
 
     async def find_by_severity(
         self,
@@ -478,6 +553,143 @@ class ComplianceRepository(BaseRepository[ComplianceViolation]):
                 for bucket in aggs["by_violation_type"]["buckets"]
             },
         }
+
+    def search_compliance_violations(
+        self,
+        standard: Optional[ComplianceStandard] = None,
+        violation_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[ComplianceStatus] = None,
+        api_name: Optional[str] = None,
+        gateway_id: Optional[UUID] = None,
+        discovered_after: Optional[datetime] = None,
+        discovered_before: Optional[datetime] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[ComplianceViolation], int]:
+        """
+        Search compliance violations with multiple filter criteria.
+        
+        This method provides flexible multi-criteria filtering for agents,
+        complementing existing list/get methods with standard, violation type,
+        severity, and date range filtering.
+        
+        Args:
+            standard: Compliance standard filter (GDPR, HIPAA, SOC2, PCI_DSS, ISO_27001)
+            violation_type: Violation type filter
+            severity: Violation severity (critical, high, medium, low)
+            status: Violation status filter
+            api_name: API name pattern (case-insensitive wildcard match)
+            gateway_id: Filter by gateway ID
+            discovered_after: Filter violations discovered after this date
+            discovered_before: Filter violations discovered before this date
+            page: Page number (1-based)
+            page_size: Number of results per page (default: 20, max: 100)
+            
+        Returns:
+            Tuple of (list of compliance violations, total count)
+            
+        Examples:
+            # Show GDPR violations with high severity from last quarter
+            from datetime import datetime, timedelta
+            quarter_ago = datetime.utcnow() - timedelta(days=90)
+            violations, total = repo.search_compliance_violations(
+                standard=ComplianceStandard.GDPR,
+                severity="high",
+                discovered_after=quarter_ago
+            )
+        """
+        # Validate and normalize pagination
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        from_ = (page - 1) * page_size
+        
+        # Build bool query with must clauses
+        must_clauses = []
+        
+        # Standard filter
+        if standard:
+            standard_value = standard.value if isinstance(standard, ComplianceStandard) else standard
+            must_clauses.append({
+                "term": {"compliance_standard": standard_value}
+            })
+        
+        # Violation type filter
+        if violation_type:
+            must_clauses.append({
+                "term": {"violation_type": violation_type.lower()}
+            })
+        
+        # Severity filter
+        if severity:
+            must_clauses.append({
+                "term": {"severity": severity.lower()}
+            })
+        
+        # Status filter
+        if status:
+            status_value = status.value if isinstance(status, ComplianceStatus) else status
+            must_clauses.append({
+                "term": {"status": status_value}
+            })
+        
+        # API name filter (case-insensitive wildcard)
+        if api_name:
+            must_clauses.append({
+                "wildcard": {
+                    "api_name": {
+                        "value": f"*{api_name.lower()}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
+        
+        # Gateway filter
+        if gateway_id:
+            must_clauses.append({
+                "term": {"gateway_id": str(gateway_id)}
+            })
+        
+        # Date range filters
+        if discovered_after or discovered_before:
+            range_query: dict[str, Any] = {}
+            if discovered_after:
+                range_query["gte"] = discovered_after.isoformat()
+            if discovered_before:
+                range_query["lte"] = discovered_before.isoformat()
+            must_clauses.append({
+                "range": {"detected_at": range_query}
+            })
+        
+        # Build final query
+        query = {
+            "bool": {
+                "must": must_clauses if must_clauses else [{"match_all": {}}]
+            }
+        }
+        
+        # Execute search with sorting by severity (critical first) and detected_at (newest first)
+        body = {
+            "query": query,
+            "sort": [
+                {"severity": {"order": "asc"}},  # critical < high < medium < low
+                {"detected_at": {"order": "desc"}}
+            ],
+            "size": page_size,
+            "from": from_,
+        }
+        
+        try:
+            response = self.client.search(index=self.index_name, body=body)
+            violations = [
+                self.model_class(**hit["_source"]) for hit in response["hits"]["hits"]
+            ]
+            total = response["hits"]["total"]["value"]
+            return violations, total
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to search compliance violations: {e}")
+            return [], 0
 
 
 # Made with Bob

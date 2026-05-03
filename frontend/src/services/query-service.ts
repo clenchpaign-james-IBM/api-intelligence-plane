@@ -1,122 +1,239 @@
-import { api } from './api'
+/**
+ * Query Service - Natural Language Query API Client
+ * 
+ * Handles communication with the agentic query API endpoint,
+ * including session management for multi-turn conversations.
+ * 
+ * Feature: 002-agentic-query
+ * Task: T085
+ */
 
-export interface NewSessionRequest {
-  user_id?: string
-}
+import axios, { AxiosInstance } from 'axios';
 
-export interface NewSessionResponse {
-  session_id: string
-  created_at: string
-}
+// Session ID storage key
+const SESSION_ID_KEY = 'agentic_query_session_id';
 
+/**
+ * Query request parameters
+ */
 export interface QueryRequest {
-  query_text: string
-  session_id?: string
-  use_ai_agents?: boolean
+  query_text: string;
+  session_id?: string;
+  mode?: 'auto' | 'agentic' | 'fallback';
+  options?: {
+    max_iterations?: number;
+    enable_synthesis?: boolean;
+    enable_fallback?: boolean;
+    timeout_ms?: number;
+  };
 }
 
+/**
+ * Query response structure
+ */
 export interface QueryResponse {
-  query_id: string
-  query_text: string
-  response_text: string
-  confidence_score: number
-  results: Record<string, any>
-  follow_up_queries?: string[]
-  execution_time_ms: number
+  query_id: string;
+  session_id: string;
+  query_text: string;
+  execution_mode: 'agentic' | 'fallback' | 'hybrid';
+  confidence: number;
+  answer: string;
+  results: {
+    entity_type: string;
+    entities: Record<string, any>;
+    total_count: number;
+    synthesis_summary: string;
+  };
+  agentic_metadata?: {
+    coordinator_state: {
+      iteration: number;
+      max_iterations: number;
+      is_complete: boolean;
+      completion_reasoning: string;
+      completed_steps: string[];
+    };
+    agent_decisions: Array<{
+      agent_type: string;
+      query: string;
+      reasoning: string;
+      confidence: number;
+      selected_tools: string[];
+      execution_time_ms: number;
+      success: boolean;
+    }>;
+    tool_invocations: Array<{
+      tool_name: string;
+      parameters: Record<string, any>;
+      result_count: number;
+      execution_time_ms: number;
+      success: boolean;
+      cache_hit: boolean;
+    }>;
+    iterations: number;
+    completed_steps: string[];
+  };
+  fallback_trigger?: {
+    reason: string;
+    reasoning: string;
+    confidence_score?: number;
+    tool_failure_rate?: number;
+    execution_time_ms?: number;
+    timestamp: string;
+  };
+  performance: {
+    execution_time_ms: number;
+    llm_calls: number;
+    tool_calls: number;
+    cache_hits: number;
+  };
+  metadata: {
+    timestamp: string;
+    version: string;
+  };
 }
 
-export interface FeedbackRequest {
-  feedback: 'positive' | 'negative' | 'neutral'
-  comment?: string
-}
+/**
+ * Query Service Class
+ * 
+ * Manages natural language queries with session persistence
+ * for multi-turn conversations.
+ */
+export class QueryService {
+  private client: AxiosInstance;
+  private currentSessionId: string | null = null;
 
-export interface QueryHistoryParams {
-  session_id?: string
-  page?: number
-  page_size?: number
-}
+  constructor(baseURL: string = '/api/v1') {
+    this.client = axios.create({
+      baseURL,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
 
-export interface QueryHistoryResponse {
-  items: QueryResponse[]
-  total: number
-  page: number
-  page_size: number
-}
+    // Load existing session ID from storage
+    this.loadSessionId();
+  }
 
-export const queryService = {
   /**
-   * Create a new query session
+   * Load session ID from localStorage
    */
-  createSession: async (
-    request: NewSessionRequest = {}
-  ): Promise<NewSessionResponse> => {
-    const response = await api.post<NewSessionResponse>(
-      '/api/v1/query/sessions',
-      request
-    )
-    return response
-  },
+  private loadSessionId(): void {
+    try {
+      const storedSessionId = localStorage.getItem(SESSION_ID_KEY);
+      if (storedSessionId) {
+        this.currentSessionId = storedSessionId;
+        console.log('[QueryService] Loaded session ID:', storedSessionId);
+      }
+    } catch (error) {
+      console.warn('[QueryService] Failed to load session ID:', error);
+    }
+  }
+
+  /**
+   * Save session ID to localStorage
+   */
+  private saveSessionId(sessionId: string): void {
+    try {
+      localStorage.setItem(SESSION_ID_KEY, sessionId);
+      this.currentSessionId = sessionId;
+      console.log('[QueryService] Saved session ID:', sessionId);
+    } catch (error) {
+      console.warn('[QueryService] Failed to save session ID:', error);
+    }
+  }
+
+  /**
+   * Get current session ID
+   */
+  public getSessionId(): string | null {
+    return this.currentSessionId;
+  }
+
+  /**
+   * Clear current session (start new conversation)
+   */
+  public clearSession(): void {
+    try {
+      localStorage.removeItem(SESSION_ID_KEY);
+      this.currentSessionId = null;
+      console.log('[QueryService] Cleared session');
+    } catch (error) {
+      console.warn('[QueryService] Failed to clear session:', error);
+    }
+  }
 
   /**
    * Execute a natural language query
+   * 
+   * Automatically maintains session ID for multi-turn conversations.
+   * 
+   * @param queryText - Natural language query
+   * @param options - Optional query parameters
+   * @returns Query response with results and metadata
    */
-  executeQuery: async (request: QueryRequest): Promise<QueryResponse> => {
-    const response = await api.post<QueryResponse>('/api/v1/query', request)
-    return response
-  },
+  public async executeQuery(
+    queryText: string,
+    options?: Partial<QueryRequest>
+  ): Promise<QueryResponse> {
+    const request: QueryRequest = {
+      query_text: queryText,
+      session_id: this.currentSessionId || undefined,
+      ...options,
+    };
 
-  /**
-   * Get query history
-   */
-  getHistory: async (
-    params: QueryHistoryParams = {}
-  ): Promise<QueryHistoryResponse> => {
-    const response = await api.get<QueryHistoryResponse>(
-      '/api/v1/query/history',
-      params
-    )
+    try {
+      const response = await this.client.post<QueryResponse>('/query', request);
+      
+      // Save session ID from response for future queries
+      if (response.data.session_id) {
+        this.saveSessionId(response.data.session_id);
+      }
 
-    return {
-      items: response?.items ?? [],
-      total: response?.total ?? 0,
-      page: response?.page ?? 1,
-      page_size: response?.page_size ?? 20,
+      return response.data;
+    } catch (error) {
+      console.error('[QueryService] Query execution failed:', error);
+      throw error;
     }
-  },
+  }
 
   /**
-   * Get a specific query by ID
+   * Execute a query in a new session (ignore current session)
+   * 
+   * @param queryText - Natural language query
+   * @param options - Optional query parameters
+   * @returns Query response
    */
-  getQuery: async (queryId: string): Promise<QueryResponse> => {
-    const response = await api.get<QueryResponse>(`/api/v1/query/${queryId}`)
-    return response
-  },
+  public async executeNewQuery(
+    queryText: string,
+    options?: Partial<QueryRequest>
+  ): Promise<QueryResponse> {
+    // Temporarily clear session for this query
+    const previousSessionId = this.currentSessionId;
+    this.currentSessionId = null;
+
+    try {
+      const response = await this.executeQuery(queryText, options);
+      return response;
+    } finally {
+      // Restore previous session if query failed
+      if (previousSessionId && !this.currentSessionId) {
+        this.currentSessionId = previousSessionId;
+      }
+    }
+  }
 
   /**
-   * Provide feedback on a query
+   * Check if currently in a conversation session
    */
-  provideFeedback: async (
-    queryId: string,
-    feedback: FeedbackRequest
-  ): Promise<void> => {
-    await api.post(`/api/v1/query/${queryId}/feedback`, feedback)
-  },
-
-  /**
-   * Delete a query session
-   */
-  deleteSession: async (sessionId: string): Promise<void> => {
-    await api.delete(`/api/v1/query/sessions/${sessionId}`)
-  },
+  public hasActiveSession(): boolean {
+    return this.currentSessionId !== null;
+  }
 }
 
-export const createQuerySession = queryService.createSession
-export const executeQuery = queryService.executeQuery
-export const getQueryHistory = queryService.getHistory
-export const getQuery = queryService.getQuery
-export const provideQueryFeedback = queryService.provideFeedback
-export const deleteQuerySession = queryService.deleteSession
+// Export singleton instance
+export const queryService = new QueryService();
 
-export default queryService
+// Export default
+export default queryService;
 
 // Made with Bob

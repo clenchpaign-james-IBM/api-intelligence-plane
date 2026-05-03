@@ -297,6 +297,74 @@ async def list_gateways(
             detail=f"Failed to list gateways: {str(e)}",
         )
 
+@router.get(
+    "/search",
+    response_model=GatewayListResponse,
+    summary="Search gateways with multiple filters",
+)
+async def search_gateways(
+    name: Optional[str] = Query(None, description="Gateway name pattern (case-insensitive wildcard)"),
+    vendor: Optional[GatewayVendor] = Query(None, description="Gateway vendor filter"),
+    gateway_status: Optional[GatewayStatus] = Query(None, alias="status", description="Gateway status filter"),
+    created_after: Optional[datetime] = Query(None, description="Filter gateways created after this date (ISO 8601)"),
+    created_before: Optional[datetime] = Query(None, description="Filter gateways created before this date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+) -> GatewayListResponse:
+    """
+    Search gateways with multiple filter criteria.
+    
+    This endpoint provides flexible multi-criteria filtering for agents,
+    complementing the list endpoint with text pattern matching and date ranges.
+    
+    Args:
+        name: Gateway name pattern (case-insensitive wildcard match)
+        vendor: Gateway vendor filter
+        status: Gateway status filter
+        created_after: Filter gateways created after this date
+        created_before: Filter gateways created before this date
+        page: Page number (1-based)
+        page_size: Number of items per page
+        
+    Returns:
+        Paginated list of matching gateways
+        
+    Examples:
+        - Find gateways with "prod" in name that are connected:
+          GET /api/v1/gateways/search?name=prod&status=connected
+        
+        - Find webMethods gateways created in last 7 days:
+          GET /api/v1/gateways/search?vendor=webmethods&created_after=2026-04-25T00:00:00Z
+    """
+    try:
+        repo = GatewayRepository()
+        
+        # Call repository search method
+        gateways, total = repo.search_gateways(
+            name=name,
+            vendor=vendor,
+            status=gateway_status,
+            created_after=created_after,
+            created_before=created_before,
+            page=page,
+            page_size=page_size,
+        )
+        
+        return GatewayListResponse(
+            items=gateways,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to search gateways: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search gateways: {str(e)}",
+        )
+
+
 
 @router.get(
     "/{gateway_id}",

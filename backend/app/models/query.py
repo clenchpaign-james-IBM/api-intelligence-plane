@@ -2,6 +2,9 @@
 
 Represents a natural language query with original text, interpreted intent,
 results, and user feedback.
+
+Extended for agentic query service (Feature: 001-agentic-query) to include
+agent decisions, tool invocations, and execution mode metadata.
 """
 
 from datetime import datetime
@@ -10,6 +13,14 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+# Import agentic models for extended query support
+from app.models.agent import (
+    AgentDecision,
+    ExecutionMode,
+    FallbackReason,
+    ToolInvocation,
+)
 
 
 class QueryType(str, Enum):
@@ -153,6 +164,9 @@ class QueryResults(BaseModel):
 class Query(BaseModel):
     """Query entity representing a natural language query.
 
+    Extended for agentic query service (Feature: 001-agentic-query) to include
+    agent decisions, tool invocations, and execution mode metadata.
+
     Attributes:
         id: Unique identifier (UUID v4)
         session_id: Conversation session (UUID v4)
@@ -170,6 +184,12 @@ class Query(BaseModel):
         follow_up_queries: Suggested follow-ups (max 5)
         metadata: Additional data
         created_at: Query timestamp
+        
+        # Agentic query fields (Feature: 001-agentic-query)
+        execution_mode: Execution mode (agentic or fallback)
+        agent_decisions: List of agent decisions made
+        tool_invocations: List of tool invocations
+        fallback_reason: Reason for fallback (if mode=fallback)
     """
 
     id: UUID = Field(default_factory=uuid4, description="Unique identifier")
@@ -201,6 +221,24 @@ class Query(BaseModel):
     metadata: Optional[dict[str, Any]] = Field(None, description="Additional data")
     created_at: datetime = Field(
         default_factory=datetime.utcnow, description="Query timestamp"
+    )
+    
+    # Agentic query fields (Feature: 001-agentic-query)
+    execution_mode: Optional[ExecutionMode] = Field(
+        None,
+        description="Execution mode: agentic (using agents) or fallback (using OpenSearch)"
+    )
+    agent_decisions: Optional[List[AgentDecision]] = Field(
+        None,
+        description="List of agent decisions made during query processing"
+    )
+    tool_invocations: Optional[List[ToolInvocation]] = Field(
+        None,
+        description="List of tool invocations performed by agents"
+    )
+    fallback_reason: Optional[FallbackReason] = Field(
+        None,
+        description="Reason for fallback to OpenSearch (only if execution_mode=fallback)"
     )
 
     @field_validator("query_text")

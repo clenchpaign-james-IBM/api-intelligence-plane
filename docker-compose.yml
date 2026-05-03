@@ -60,9 +60,9 @@ services:
       - OPENSEARCH_SCHEME=http
       - LOG_LEVEL=DEBUG
       - PYTHONUNBUFFERED=1
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - LLM_PROVIDER=ollama
-      - LLM_MODEL=llama3.1:8b
+      # - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # - LLM_PROVIDER=ollama
+      # - LLM_MODEL=llama3.1:8b
     env_file:
       - .env
     volumes:

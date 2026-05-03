@@ -42,7 +42,7 @@ class SecurityScheduler:
         # Security scan job - runs every 1 hour
         self.scheduler.add_job(
             func=self._run_security_scan,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=IntervalTrigger(minutes=self.settings.SECURITY_SCAN_INTERVAL_MINUTES),
             id="security_scan",
             name="Security Scan - All APIs",
             replace_existing=True,

@@ -1,0 +1,859 @@
+# Router Tool Abstraction Layer - Tool Schemas
+# Feature: 001-agentic-query
+# Date: 2026-04-30
+#
+# These tools wrap backend router methods for direct invocation by agents.
+# Each tool maps to a specific router method in the backend API layer.
+#
+# Key Design Decision: Agents call router methods DIRECTLY (not via MCP HTTP)
+# - Zero network overhead (same process)
+# - Type safety preserved
+# - Validation logic in routers maintained
+# - Sub-millisecond invocation latency
+
+version: "1.0"
+description: "Router tool schemas for agentic query service"
+
+# Tool Categories:
+# 1. Gateway Management (10 tools)
+# 2. API Discovery (5 tools)
+# 3. Metrics & Analytics (6 tools)
+# 4. Security (10 tools)
+# 5. Compliance (5 tools)
+# 6. Optimization (12 tools)
+# 7. Rate Limiting (8 tools)
+# 8. Predictions (5 tools)
+
+tools:
+  # ============================================================================
+  # GATEWAY MANAGEMENT TOOLS (10 tools)
+  # ============================================================================
+  
+  - name: create_gateway
+    description: "Create and register a new API Gateway in the system"
+    router_method: "app.api.v1.gateways.create_gateway"
+    agent_domains: ["discovery"]
+    parameters:
+      - name: name
+        type: string
+        required: true
+        description: "Human-readable gateway name"
+      - name: vendor
+        type: string
+        required: true
+        enum: [native, kong, apigee, aws, azure, mulesoft, webmethods]
+        description: "Gateway vendor type"
+      - name: base_url
+        type: string
+        required: true
+        description: "Gateway base URL for API management endpoints"
+      - name: version
+        type: string
+        required: false
+        description: "Optional gateway version string"
+      - name: base_url_credential_type
+        type: string
+        required: false
+        default: "none"
+        enum: [none, api_key, basic, bearer]
+        description: "Authentication type for gateway"
+      - name: base_url_api_key
+        type: string
+        required: false
+        description: "API key if credential_type is api_key"
+    returns:
+      type: object
+      description: "Created gateway object with id, name, vendor, status, base_url, created_at"
+    example:
+      input:
+        name: "Production Kong Gateway"
+        vendor: "kong"
+        base_url: "https://api.example.com:8001"
+        base_url_credential_type: "api_key"
+        base_url_api_key: "your-api-key-here"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        name: "Production Kong Gateway"
+        vendor: "kong"
+        status: "DISCONNECTED"
+        base_url: "https://api.example.com:8001"
+        created_at: "2026-04-30T05:00:00Z"
+
+  - name: list_gateways
+    description: "List all registered API Gateways with pagination and filtering"
+    router_method: "app.api.v1.gateways.list_gateways"
+    agent_domains: ["discovery", "coordinator"]
+    parameters:
+      - name: page
+        type: integer
+        required: false
+        default: 1
+        description: "Page number (1-based)"
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+        description: "Items per page (1-100)"
+      - name: status
+        type: string
+        required: false
+        enum: [connected, disconnected, error]
+        description: "Filter by connection status"
+    returns:
+      type: object
+      description: "Paginated gateway list with items, total, page, page_size"
+
+  - name: get_gateway
+    description: "Get detailed information about a specific API Gateway"
+    router_method: "app.api.v1.gateways.get_gateway"
+    agent_domains: ["discovery", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+        description: "Gateway UUID"
+    returns:
+      type: object
+      description: "Complete gateway object with all fields"
+
+  - name: connect_gateway
+    description: "Establish connection to a Gateway and validate credentials"
+    router_method: "app.api.v1.gateways.connect_gateway"
+    agent_domains: ["discovery"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+        description: "Gateway UUID"
+    returns:
+      type: object
+      description: "Updated gateway object with CONNECTED status"
+
+  - name: sync_gateway
+    description: "Trigger API discovery and synchronization from a Gateway"
+    router_method: "app.api.v1.gateways.sync_gateway"
+    agent_domains: ["discovery"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+        description: "Gateway UUID"
+      - name: force_refresh
+        type: boolean
+        required: false
+        default: false
+        description: "Force immediate sync even if recently synced"
+    returns:
+      type: object
+      description: "Sync results with apis_discovered, new_apis, updated_apis, shadow_apis_found, timestamp"
+
+  # ============================================================================
+  # API DISCOVERY TOOLS (5 tools)
+  # ============================================================================
+
+  - name: list_all_apis
+    description: "List all APIs across all gateways with comprehensive filtering"
+    router_method: "app.api.v1.apis.list_all_apis"
+    agent_domains: ["discovery", "coordinator"]
+    parameters:
+      - name: page
+        type: integer
+        required: false
+        default: 1
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+      - name: gateway_id
+        type: string
+        required: false
+        description: "Filter by gateway"
+      - name: status
+        type: string
+        required: false
+        enum: [active, inactive, deprecated, failed]
+        description: "Filter by API status"
+      - name: is_shadow
+        type: boolean
+        required: false
+        description: "Filter shadow APIs"
+      - name: health_score_min
+        type: number
+        required: false
+        description: "Minimum health score (0.0-1.0)"
+    returns:
+      type: object
+      description: "Paginated API list with items, total, page, page_size"
+
+  - name: list_apis
+    description: "List APIs for a specific Gateway with filtering options"
+    router_method: "app.api.v1.apis.list_apis"
+    agent_domains: ["discovery"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+        description: "Gateway UUID"
+      - name: page
+        type: integer
+        required: false
+        default: 1
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+      - name: status
+        type: string
+        required: false
+        enum: [active, inactive, deprecated, failed]
+      - name: is_shadow
+        type: boolean
+        required: false
+      - name: health_score_min
+        type: number
+        required: false
+    returns:
+      type: object
+      description: "Paginated API list for the gateway"
+
+  - name: search_apis
+    description: "Search APIs using OpenSearch full-text search with fuzzy matching"
+    router_method: "app.api.v1.apis.search_apis"
+    agent_domains: ["discovery", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+        description: "Gateway UUID"
+      - name: query
+        type: string
+        required: true
+        description: "Search query string"
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+        description: "Maximum results (1-1000)"
+      - name: status
+        type: string
+        required: false
+      - name: is_shadow
+        type: boolean
+        required: false
+    returns:
+      type: object
+      description: "Search results with results array, total, query"
+
+  - name: get_api
+    description: "Get complete details of a specific API including policies and metrics"
+    router_method: "app.api.v1.apis.get_api"
+    agent_domains: ["discovery", "metrics", "security", "compliance"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Complete API object with id, name, base_path, version, status, is_shadow, policy_actions, current_metrics, intelligence_metadata, health_score"
+
+  - name: get_api_security_policies
+    description: "Get security-related policy actions configured for an API"
+    router_method: "app.api.v1.apis.get_api_security_policies"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+    returns:
+      type: array
+      description: "List of security-related PolicyAction objects"
+
+  # ============================================================================
+  # METRICS & ANALYTICS TOOLS (6 tools)
+  # ============================================================================
+
+  - name: get_analytics_metrics
+    description: "Get time-bucketed analytics metrics across all gateways or specific gateway"
+    router_method: "app.api.v1.analytics.get_analytics_metrics"
+    agent_domains: ["metrics", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: false
+      - name: api_id
+        type: string
+        required: false
+      - name: time_bucket
+        type: string
+        required: false
+        default: "1h"
+        enum: ["1m", "5m", "1h", "1d"]
+        description: "Time bucket size"
+      - name: limit
+        type: integer
+        required: false
+        default: 50
+        description: "Maximum results (1-1000)"
+    returns:
+      type: object
+      description: "Analytics metrics with items array, total, time_bucket"
+
+  - name: get_metrics_summary
+    description: "Get aggregated metrics summary across all gateways for last 24 hours"
+    router_method: "app.api.v1.metrics.get_metrics_summary"
+    agent_domains: ["metrics", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Summary metrics with total_requests_24h, avg_response_time, avg_error_rate"
+
+  - name: get_api_metrics
+    description: "Get time-bucketed performance metrics for a specific API"
+    router_method: "app.api.v1.metrics.get_api_metrics"
+    agent_domains: ["metrics"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+      - name: start_time
+        type: string
+        required: false
+        description: "Start time (ISO 8601, default: 24 hours ago)"
+      - name: end_time
+        type: string
+        required: false
+        description: "End time (ISO 8601, default: now)"
+      - name: time_bucket
+        type: string
+        required: false
+        default: "5m"
+        enum: ["1m", "5m", "1h", "1d"]
+    returns:
+      type: object
+      description: "Comprehensive metrics with time_series, aggregated, cache_metrics, timing_breakdown, status_breakdown"
+
+  - name: drill_down_to_logs
+    description: "Drill down from analytics metric to source transactional logs"
+    router_method: "app.api.v1.analytics.drill_down_to_logs"
+    agent_domains: ["metrics"]
+    parameters:
+      - name: metric_id
+        type: string
+        required: true
+        description: "Metric UUID"
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+        description: "Maximum logs (1-1000)"
+    returns:
+      type: object
+      description: "Drill-down results with items array, total, metric_summary, time_range"
+
+  - name: get_gateway_metrics_summary
+    description: "Get aggregated metrics summary for all APIs within a gateway"
+    router_method: "app.api.v1.metrics.get_gateway_metrics_summary"
+    agent_domains: ["metrics"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: status
+        type: string
+        required: false
+      - name: start_time
+        type: string
+        required: false
+      - name: end_time
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Gateway-wide metrics summary"
+
+  # ============================================================================
+  # SECURITY TOOLS (10 tools)
+  # ============================================================================
+
+  - name: get_security_summary
+    description: "Get security summary with vulnerability counts across all gateways"
+    router_method: "app.api.v1.security.get_security_summary"
+    agent_domains: ["security", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Security summary with total_vulnerabilities, critical_vulnerabilities, high_vulnerabilities, medium_vulnerabilities, low_vulnerabilities"
+
+  - name: list_all_vulnerabilities
+    description: "List security vulnerabilities across all gateways with comprehensive filtering"
+    router_method: "app.api.v1.security.list_all_vulnerabilities"
+    agent_domains: ["security", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: false
+      - name: api_id
+        type: string
+        required: false
+      - name: status
+        type: string
+        required: false
+        enum: [open, remediated, in_progress, verified]
+      - name: severity
+        type: string
+        required: false
+        enum: [critical, high, medium, low]
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+    returns:
+      type: array
+      description: "List of vulnerability objects"
+
+  - name: get_security_posture
+    description: "Get comprehensive security posture metrics and risk score"
+    router_method: "app.api.v1.security.get_security_posture"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: false
+      - name: api_id
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Security posture with total_vulnerabilities, by_severity, by_status, by_type, remediation_rate, risk_score, risk_level, avg_remediation_time_ms"
+
+  - name: scan_api_security
+    description: "Scan API for security vulnerabilities using hybrid rule-based and AI analysis"
+    router_method: "app.api.v1.security.scan_api_security"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Scan results with scan_id, api_id, api_name, scan_completed_at, vulnerabilities_found, severity_breakdown, vulnerabilities array, remediation_plan"
+
+  - name: list_vulnerabilities
+    description: "List security vulnerabilities for a specific gateway with filtering"
+    router_method: "app.api.v1.security.list_vulnerabilities"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: status
+        type: string
+        required: false
+        enum: [open, remediated, in_progress, verified]
+      - name: severity
+        type: string
+        required: false
+        enum: [critical, high, medium, low]
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+    returns:
+      type: array
+      description: "List of vulnerability objects for the gateway"
+
+  - name: get_vulnerability
+    description: "Get detailed information about a specific security vulnerability"
+    router_method: "app.api.v1.security.get_vulnerability"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: vulnerability_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Complete vulnerability object"
+
+  - name: remediate_vulnerability
+    description: "Trigger automated remediation for a security vulnerability"
+    router_method: "app.api.v1.security.remediate_vulnerability"
+    agent_domains: ["security"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: vulnerability_id
+        type: string
+        required: true
+      - name: remediation_strategy
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Remediation result with vulnerability_id, status, remediation_result, verification_result, message"
+
+  # ============================================================================
+  # COMPLIANCE TOOLS (5 tools)
+  # ============================================================================
+
+  - name: scan_api_compliance
+    description: "Scan API for compliance violations across 5 regulatory standards"
+    router_method: "app.api.v1.compliance.scan_api_compliance"
+    agent_domains: ["compliance"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+      - name: standards
+        type: array
+        required: false
+        items:
+          type: string
+          enum: [GDPR, HIPAA, SOC2, PCI_DSS, ISO_27001]
+        description: "Specific standards to check (default: all)"
+    returns:
+      type: object
+      description: "Scan results with scan_id, api_id, api_name, scan_completed_at, violations_found, severity_breakdown, standard_breakdown, violations array, audit_evidence"
+
+  - name: list_compliance_violations
+    description: "List compliance violations for a gateway with filtering"
+    router_method: "app.api.v1.compliance.list_compliance_violations"
+    agent_domains: ["compliance"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: standard
+        type: string
+        required: false
+        enum: [GDPR, HIPAA, SOC2, PCI_DSS, ISO_27001]
+      - name: severity
+        type: string
+        required: false
+        enum: [critical, high, medium, low]
+      - name: status
+        type: string
+        required: false
+        enum: [open, in_progress, remediated]
+      - name: limit
+        type: integer
+        required: false
+        default: 100
+    returns:
+      type: array
+      description: "List of compliance violation objects"
+
+  - name: get_compliance_posture
+    description: "Get compliance posture metrics and scores for a gateway"
+    router_method: "app.api.v1.compliance.get_compliance_posture"
+    agent_domains: ["compliance"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: standard
+        type: string
+        required: false
+    returns:
+      type: object
+      description: "Compliance posture with total_violations, by_severity, by_status, by_standard, remediation_rate, compliance_score, last_scan, next_audit_date"
+
+  - name: generate_audit_report
+    description: "Generate comprehensive audit report with evidence and recommendations"
+    router_method: "app.api.v1.compliance.generate_audit_report"
+    agent_domains: ["compliance"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: standard
+        type: string
+        required: false
+      - name: start_date
+        type: string
+        required: false
+        description: "Report start date (ISO 8601, default: 90 days ago)"
+      - name: end_date
+        type: string
+        required: false
+        description: "Report end date (ISO 8601, default: now)"
+    returns:
+      type: object
+      description: "Comprehensive audit report"
+
+  # ============================================================================
+  # OPTIMIZATION TOOLS (12 tools)
+  # ============================================================================
+
+  - name: generate_recommendations
+    description: "Generate AI-driven optimization recommendations for an API"
+    router_method: "app.api.v1.optimization.generate_recommendations"
+    agent_domains: ["optimization"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+      - name: min_impact
+        type: number
+        required: false
+        default: 10.0
+        description: "Minimum expected improvement % (0-100)"
+    returns:
+      type: object
+      description: "Generation result with status and message"
+
+  - name: list_recommendations
+    description: "List optimization recommendations for a gateway"
+    router_method: "app.api.v1.optimization.list_recommendations"
+    agent_domains: ["optimization", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: priority
+        type: string
+        required: false
+        enum: [high, medium, low]
+      - name: status
+        type: string
+        required: false
+        enum: [pending, implemented, rejected]
+      - name: page
+        type: integer
+        required: false
+        default: 1
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+    returns:
+      type: object
+      description: "Paginated recommendations list"
+
+  - name: get_recommendation
+    description: "Get detailed information about a specific recommendation"
+    router_method: "app.api.v1.optimization.get_recommendation"
+    agent_domains: ["optimization"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: recommendation_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Complete recommendation object"
+
+  - name: apply_recommendation
+    description: "Apply optimization recommendation to Gateway"
+    router_method: "app.api.v1.optimization.apply_recommendation"
+    agent_domains: ["optimization"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: recommendation_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Application result with success status"
+
+  # ============================================================================
+  # RATE LIMITING TOOLS (8 tools)
+  # ============================================================================
+
+  - name: create_rate_limit_policy
+    description: "Create intelligent rate limit policy for an API"
+    router_method: "app.api.v1.rate_limits.create_rate_limit_policy"
+    agent_domains: ["optimization"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: true
+      - name: policy_name
+        type: string
+        required: true
+      - name: policy_type
+        type: string
+        required: true
+        enum: [fixed, adaptive, priority_based]
+      - name: limit_thresholds
+        type: object
+        required: true
+        description: "Thresholds with requests_per_second, requests_per_minute, requests_per_hour, concurrent_requests"
+      - name: enforcement_action
+        type: string
+        required: false
+        default: "throttle"
+        enum: [throttle, reject, queue]
+    returns:
+      type: object
+      description: "Created policy object"
+
+  - name: list_rate_limit_policies
+    description: "List rate limit policies for a gateway"
+    router_method: "app.api.v1.rate_limits.list_rate_limit_policies"
+    agent_domains: ["optimization"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: status
+        type: string
+        required: false
+        enum: [active, inactive, draft]
+      - name: page
+        type: integer
+        required: false
+        default: 1
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+    returns:
+      type: object
+      description: "Paginated policies list"
+
+  # ============================================================================
+  # PREDICTION TOOLS (5 tools)
+  # ============================================================================
+
+  - name: list_predictions
+    description: "List failure predictions for a gateway"
+    router_method: "app.api.v1.predictions.list_predictions"
+    agent_domains: ["prediction", "coordinator"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: api_id
+        type: string
+        required: false
+      - name: severity
+        type: string
+        required: false
+        enum: [critical, high, medium, low]
+      - name: status
+        type: string
+        required: false
+        enum: [active, resolved, false_positive, expired]
+      - name: page
+        type: integer
+        required: false
+        default: 1
+      - name: page_size
+        type: integer
+        required: false
+        default: 20
+    returns:
+      type: object
+      description: "Paginated predictions list"
+
+  - name: get_prediction
+    description: "Get detailed information about a specific prediction"
+    router_method: "app.api.v1.predictions.get_prediction"
+    agent_domains: ["prediction"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: prediction_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "Complete prediction object"
+
+  - name: get_prediction_explanation
+    description: "Get AI-generated explanation for a prediction"
+    router_method: "app.api.v1.predictions.get_prediction_explanation"
+    agent_domains: ["prediction"]
+    parameters:
+      - name: gateway_id
+        type: string
+        required: true
+      - name: prediction_id
+        type: string
+        required: true
+    returns:
+      type: object
+      description: "AI-generated explanation with insights"
+
+# Tool Usage Guidelines for Agents
+#
+# 1. Tool Selection:
+#    - Agents should select tools based on agent_domains field
+#    - Coordinator can use tools from any domain for orchestration
+#    - Specialized agents should prefer tools in their domain
+#
+# 2. Parameter Validation:
+#    - All required parameters must be provided
+#    - Optional parameters use defaults if not specified
+#    - Enum values must match exactly (case-sensitive)
+#
+# 3. Error Handling:
+#    - Tools may raise ValidationError for invalid parameters
+#    - Tools may raise ToolExecutionError for execution failures
+#    - Agents should retry with exponential backoff (max 3 retries)
+#
+# 4. Performance:
+#    - Tools have sub-millisecond invocation overhead
+#    - Actual execution time depends on router method complexity
+#    - Agents should use parallel invocation for independent queries
+#
+# 5. Context Awareness:
+#    - Tools do not maintain state between invocations
+#    - Agents must pass all required context in parameters
+#    - Use QueryContext for entity resolution before tool invocation
+
+# Made with Bob

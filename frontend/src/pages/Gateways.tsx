@@ -9,6 +9,7 @@ import AddGatewayForm from '../components/gateways/AddGatewayForm';
 import GatewayCard from '../components/gateways/GatewayCard';
 import { api } from '../services/api';
 import type { Gateway } from '../types';
+import { useNotification } from '../contexts/NotificationContext';
 
 /**
  * Gateways Page
@@ -19,6 +20,7 @@ import type { Gateway } from '../types';
  * - Sync and management actions
  */
 const Gateways = () => {
+  const { showSuccess, showError, showConfirm } = useNotification();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { gatewayId } = useParams<{ gatewayId?: string }>();
@@ -57,16 +59,16 @@ const Gateways = () => {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['gateways'] });
       setSyncingGateway(null);
-      // Show success message with details
-      const message = `Sync completed: ${data.apis_discovered} APIs discovered (${data.new_apis} new, ${data.updated_apis} updated)`;
-      alert(message);
+      showSuccess(
+        'Sync Completed',
+        `${data.apis_discovered} APIs discovered (${data.new_apis} new, ${data.updated_apis} updated)`
+      );
     },
     onError: (error: any) => {
       console.error('Sync failed:', error);
       setSyncingGateway(null);
-      // Show detailed error message from backend
       const errorMessage = error.details?.detail || error.message || 'Failed to sync gateway. Please try again.';
-      alert(`Sync failed: ${errorMessage}`);
+      showError('Sync Failed', errorMessage);
     },
   });
 
@@ -86,9 +88,8 @@ const Gateways = () => {
     onError: (error: any) => {
       console.error('Bulk sync failed:', error);
       setBulkSyncStatus({ isRunning: false });
-      // Show detailed error message from backend
       const errorMessage = error.details?.detail || error.message || 'Failed to sync gateways. Please try again.';
-      alert(`Bulk sync failed: ${errorMessage}`);
+      showError('Bulk Sync Failed', errorMessage);
     },
   });
 
@@ -109,9 +110,8 @@ const Gateways = () => {
     },
     onError: (error: any) => {
       console.error('Delete failed:', error);
-      // Show detailed error message from backend
       const errorMessage = error.details?.detail || error.message || 'Failed to delete gateway. Please try again.';
-      alert(`Delete failed: ${errorMessage}`);
+      showError('Delete Failed', errorMessage);
     },
   });
 
@@ -121,13 +121,13 @@ const Gateways = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gateways'] });
       setConnectingGateway(null);
-      alert('Gateway connected successfully');
+      showSuccess('Gateway Connected', 'Gateway connected successfully');
     },
     onError: (error: any) => {
       console.error('Connect failed:', error);
       setConnectingGateway(null);
       const errorMessage = error.details?.detail || error.message || 'Failed to connect gateway. Please try again.';
-      alert(`Connect failed: ${errorMessage}`);
+      showError('Connect Failed', errorMessage);
     },
   });
 
@@ -137,13 +137,13 @@ const Gateways = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gateways'] });
       setDisconnectingGateway(null);
-      alert('Gateway disconnected successfully');
+      showSuccess('Gateway Disconnected', 'Gateway disconnected successfully');
     },
     onError: (error: any) => {
       console.error('Disconnect failed:', error);
       setDisconnectingGateway(null);
       const errorMessage = error.details?.detail || error.message || 'Failed to disconnect gateway. Please try again.';
-      alert(`Disconnect failed: ${errorMessage}`);
+      showError('Disconnect Failed', errorMessage);
     },
   });
 
@@ -162,27 +162,32 @@ const Gateways = () => {
   // Handle disconnect
   const handleDisconnect = (gatewayId: string) => {
     const gateway = data?.items.find((g: Gateway) => g.id === gatewayId);
-    const confirmed = window.confirm(
-      `Disconnect from gateway "${gateway?.name}"? The gateway will remain registered but inactive.`
+    showConfirm(
+      'Disconnect Gateway',
+      `Disconnect from gateway "${gateway?.name}"? The gateway will remain registered but inactive.`,
+      () => {
+        setDisconnectingGateway(gatewayId);
+        disconnectMutation.mutate(gatewayId);
+      }
     );
-    if (!confirmed) return;
-    setDisconnectingGateway(gatewayId);
-    disconnectMutation.mutate(gatewayId);
   };
 
   // Handle delete
   const handleDelete = (gateway: Gateway) => {
-    const confirmed = window.confirm(
-      `Delete gateway "${gateway.name}"? This action cannot be undone.`
+    showConfirm(
+      'Delete Gateway',
+      `Delete gateway "${gateway.name}"? This action cannot be undone.`,
+      () => {
+        deleteMutation.mutate(gateway.id);
+      },
+      'danger'
     );
-    if (!confirmed) return;
-    deleteMutation.mutate(gateway.id);
   };
 
   // Handle bulk sync
   const handleBulkSync = (forceRefresh: boolean = false) => {
     if (selectedGateways.size === 0) {
-      alert('Please select at least one gateway to sync');
+      showError('No Selection', 'Please select at least one gateway to sync');
       return;
     }
     setBulkSyncStatus({ isRunning: true });

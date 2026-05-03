@@ -5,10 +5,12 @@ REST API endpoints for natural language query interface.
 """
 
 import logging
-from typing import Optional
-from uuid import UUID
+from datetime import datetime
+from typing import Any, Optional, cast
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status as http_status
+from langchain_community.chat_models import ChatLiteLLM
 from pydantic import BaseModel, Field
 
 from app.db.repositories.query_repository import QueryRepository
@@ -20,10 +22,13 @@ from app.db.repositories.compliance_repository import ComplianceRepository
 from app.db.repositories.gateway_repository import GatewayRepository
 from app.db.repositories.vulnerability_repository import VulnerabilityRepository
 from app.db.repositories.transactional_log_repository import TransactionalLogRepository
-from app.services.query_service import QueryService
+from app.services.agentic_query_service import AgenticQueryService
+from app.services.context_manager import get_context_manager
 from app.services.llm_service import LLMService
+from app.services.query_service import QueryService
 from app.models.query import Query, UserFeedback
 from app.config import Settings
+from app.tools import initialize_tools
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,10 @@ class QueryResponse(BaseModel):
     results: dict = Field(..., description="Query results")
     follow_up_queries: Optional[list[str]] = Field(None, description="Suggested follow-up queries")
     execution_time_ms: int = Field(..., description="Execution time in milliseconds")
+    execution_mode: Optional[str] = Field(None, description="Execution mode used")
+    agent_decisions: Optional[list[dict]] = Field(None, description="Agent decision trace")
+    tool_invocations: Optional[list[dict]] = Field(None, description="Tool invocation trace")
+    session_id: Optional[UUID] = Field(None, description="Session identifier")
 
 
 class QueryHistoryResponse(BaseModel):
@@ -93,7 +102,9 @@ gateway_repo = GatewayRepository()
 vulnerability_repo = VulnerabilityRepository()
 transactional_log_repo = TransactionalLogRepository()
 llm_service = LLMService(settings)
+tool_registry = initialize_tools()
 
+# Initialize query services
 query_service = QueryService(
     query_repository=query_repo,
     api_repository=api_repo,
@@ -105,6 +116,41 @@ query_service = QueryService(
     gateway_repository=gateway_repo,
     vulnerability_repository=vulnerability_repo,
     transactional_log_repository=transactional_log_repo,
+)
+
+# Initialize LangChain-compatible LLM for agents
+# Use the first configured provider from LLMService
+if llm_service.providers:
+    first_provider = llm_service.providers[0]
+    langchain_llm = ChatLiteLLM(
+        model=first_provider["model"],
+        api_key=first_provider.get("api_key"),
+        api_base=first_provider.get("api_base"),
+        temperature=0.7,
+    )
+else:
+    # Fallback to a default model if no providers configured
+    logger.warning("No LLM providers configured, using default model")
+    langchain_llm = ChatLiteLLM(model="gpt-3.5-turbo", temperature=0.7)
+
+# Initialize agentic query service with fallback support (T072, T073)
+from app.services.fallback_manager import FallbackManager
+from app.db.client import get_client
+
+context_manager = get_context_manager()
+opensearch_client = get_client()
+fallback_manager = FallbackManager(
+    confidence_threshold=settings.FALLBACK_CONFIDENCE_THRESHOLD,
+    failure_rate_threshold=settings.FALLBACK_FAILURE_RATE_THRESHOLD,
+    timeout_seconds=settings.FALLBACK_TIMEOUT_SECONDS,
+    opensearch_client=opensearch_client,  # T070: Enable OpenSearch logging
+)
+agentic_query_service = AgenticQueryService(
+    llm=langchain_llm,
+    tool_registry=tool_registry,
+    context_manager=context_manager,
+    fallback_service=query_service,  # T072: Enable fallback to OpenSearch
+    fallback_manager=fallback_manager,  # T073: Use configured thresholds
 )
 
 
@@ -125,9 +171,6 @@ async def create_new_session(request: Optional[NewSessionRequest] = None) -> New
     Returns:
         New session response with session ID
     """
-    from uuid import uuid4
-    from datetime import datetime
-    
     session_id = uuid4()
     created_at = datetime.utcnow().isoformat()
     
@@ -161,17 +204,21 @@ async def execute_query(request: QueryRequest) -> QueryResponse:
     """
     request.use_ai_agents = True
     try:
-        # Generate session ID if not provided
-        session_id = request.session_id or UUID("00000000-0000-0000-0000-000000000000")
-        
-        # Process query
-        query = await query_service.process_query(
-            query_text=request.query_text,
-            session_id=session_id,
-        )
-        
+        session_id = request.session_id or uuid4()
+
+        if request.use_ai_agents:
+            query = await agentic_query_service.process_query(
+                query_text=request.query_text,
+                session_id=session_id,
+            )
+        else:
+            query = await query_service.process_query(
+                query_text=request.query_text,
+                session_id=session_id,
+            )
+
         logger.info(f"Processed query {query.id} with confidence {query.confidence_score}")
-        
+
         return QueryResponse(
             query_id=query.id,
             query_text=query.query_text,
@@ -180,6 +227,14 @@ async def execute_query(request: QueryRequest) -> QueryResponse:
             results=query.results.model_dump(),
             follow_up_queries=query.follow_up_queries,
             execution_time_ms=query.execution_time_ms,
+            execution_mode=query.execution_mode.value if query.execution_mode else None,
+            agent_decisions=[
+                decision.model_dump() for decision in (query.agent_decisions or [])
+            ] or None,
+            tool_invocations=[
+                invocation.model_dump() for invocation in (query.tool_invocations or [])
+            ] or None,
+            session_id=query.session_id,
         )
         
     except Exception as e:
@@ -258,6 +313,67 @@ async def get_session_queries(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get(
+    "/query/stats",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get query statistics",
+    description="Retrieve aggregate query statistics for monitoring",
+)
+async def get_query_stats(
+    session_id: Optional[UUID] = None,
+    hours: int = 24,
+) -> dict:
+    """Get query execution statistics."""
+    try:
+        return query_repo.get_query_statistics(session_id=session_id, hours=hours)
+    except Exception as e:
+        logger.error(f"Failed to retrieve query statistics: {e}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve query statistics: {str(e)}",
+        )
+
+
+@router.get(
+    "/query/fallback/statistics",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get fallback statistics",
+    description="Retrieve fallback rate and reason analytics for monitoring (T072)",
+)
+async def get_fallback_statistics() -> dict[str, Any]:
+    """
+    T072: Get fallback reason analytics.
+    
+    Returns statistics about fallback usage including:
+    - Total queries processed
+    - Fallback queries count
+    - Fallback rate percentage
+    - Agentic queries count
+    - Agentic rate percentage
+    - Breakdown by fallback reason
+    
+    Returns:
+        Dictionary with fallback statistics
+    """
+    try:
+        stats = agentic_query_service.get_fallback_statistics()
+        
+        logger.info(
+            f"Fallback statistics retrieved: "
+            f"{stats['fallback_rate']:.1%} fallback rate "
+            f"({stats['fallback_queries']}/{stats['total_queries']} queries)"
+        )
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Failed to retrieve fallback statistics: {e}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve fallback statistics: {str(e)}",
+        )
 
 
 @router.get(

@@ -10,8 +10,10 @@ import { QueryHistory } from '../components/query/QueryHistory';
 import { QueryInput } from '../components/query/QueryInput';
 import { useQuerySession } from '../hooks/useQuerySession';
 import Loading from '../components/common/Loading';
+import { useNotification } from '../contexts/NotificationContext';
 
 export const Query: React.FC = () => {
+  const { showConfirm } = useNotification();
   const {
     sessionId,
     queries,
@@ -60,16 +62,24 @@ export const Query: React.FC = () => {
   };
 
   const handleClearSession = () => {
-    if (window.confirm('Are you sure you want to clear the conversation history?')) {
-      clearSession();
-    }
+    showConfirm(
+      'Clear History',
+      'Are you sure you want to clear the conversation history?',
+      () => {
+        clearSession();
+      }
+    );
   };
 
   const handleNewSession = async () => {
     if (queries.length > 0) {
-      if (window.confirm('Start a new conversation? Current history will be saved but you will start fresh.')) {
-        await createNewSession();
-      }
+      showConfirm(
+        'New Conversation',
+        'Start a new conversation? Current history will be saved but you will start fresh.',
+        async () => {
+          await createNewSession();
+        }
+      );
     } else {
       await createNewSession();
     }

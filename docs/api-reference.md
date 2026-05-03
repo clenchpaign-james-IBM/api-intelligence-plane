@@ -298,6 +298,73 @@ GET /api/v1/apis/{api_id}
 **Error Responses**:
 - `404 Not Found`: API not found
 - `500 Internal Server Error`: Server error
+#### Search APIs
+
+```http
+GET /api/v1/apis/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across APIs with text pattern matching, health score ranges, and date filters. Use this endpoint when you need to combine multiple filters or search by text patterns.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Text pattern to match in API name (case-insensitive wildcard) |
+| `description` | string | No | Text pattern to match in API description |
+| `status` | string | No | Filter by status (active, inactive, deprecated, failed) |
+| `authentication_type` | string | No | Filter by authentication type (none, basic, bearer, oauth2, api_key) |
+| `is_shadow` | boolean | No | Filter shadow APIs |
+| `health_score_min` | float | No | Minimum health score (0.0-1.0) |
+| `health_score_max` | float | No | Maximum health score (0.0-1.0) |
+| `gateway_id` | UUID | No | Filter by gateway ID |
+| `created_after` | ISO 8601 datetime | No | Filter APIs created after this date |
+| `created_before` | ISO 8601 datetime | No | Filter APIs created before this date |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "gateway_id": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "Payment Service API",
+      "version": "2.1.0",
+      "base_path": "/api/payments",
+      "authentication_type": "bearer",
+      "is_shadow": false,
+      "status": "active",
+      "health_score": 92.5,
+      "created_at": "2026-02-15T10:00:00Z",
+      "updated_at": "2026-03-12T15:30:00Z"
+    }
+  ],
+  "total": 15,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find APIs with "payment" in name created in last 7 days
+GET /api/v1/apis/search?name=payment&created_after=2026-03-05T00:00:00Z
+
+# Find active APIs with authentication and high health scores
+GET /api/v1/apis/search?status=active&authentication_type=bearer&health_score_min=0.8
+
+# Find shadow APIs with low health scores
+GET /api/v1/apis/search?is_shadow=true&health_score_max=0.5
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters (e.g., health_score out of range)
+- `500 Internal Server Error`: Server error
+
 
 #### Get Derived Security Policies
 
@@ -682,6 +749,65 @@ GET /api/v1/gateways
   "page_size": 20
 }
 ```
+#### Search Gateways
+
+```http
+GET /api/v1/gateways/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across gateways with text pattern matching and date filters. Use this endpoint when you need to combine multiple filters or search by name patterns.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Text pattern to match in gateway name (case-insensitive wildcard) |
+| `vendor` | string | No | Filter by vendor (webmethods, kong, apigee, native) |
+| `status` | string | No | Filter by connection status (connected, disconnected, error) |
+| `created_after` | ISO 8601 datetime | No | Filter gateways created after this date |
+| `created_before` | ISO 8601 datetime | No | Filter gateways created before this date |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "Production Gateway",
+      "vendor": "native",
+      "base_url": "http://gateway:8080",
+      "status": "connected",
+      "api_count": 45,
+      "last_sync_at": "2026-03-12T15:30:00Z",
+      "created_at": "2026-03-01T10:00:00Z"
+    }
+  ],
+  "total": 3,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find gateways with "prod" in name that are connected
+GET /api/v1/gateways/search?name=prod&status=connected
+
+# Find webMethods gateways created in last month
+GET /api/v1/gateways/search?vendor=webmethods&created_after=2026-02-12T00:00:00Z
+
+# Find disconnected gateways
+GET /api/v1/gateways/search?status=disconnected
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters
+- `500 Internal Server Error`: Server error
+
 
 #### Register Gateway
 
@@ -872,6 +998,70 @@ GET /api/v1/predictions
   "page_size": 20
 }
 ```
+#### Search Predictions
+
+```http
+GET /api/v1/predictions/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across predictions with confidence ranges, prediction types, and time filters. Use this endpoint when you need to combine multiple filters or search by specific criteria.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prediction_type` | string | No | Filter by prediction type (failure, performance_degradation, capacity_issue) |
+| `confidence_min` | float | No | Minimum confidence score (0.0-1.0) |
+| `confidence_max` | float | No | Maximum confidence score (0.0-1.0) |
+| `severity` | string | No | Filter by severity (critical, high, medium, low) |
+| `status` | string | No | Filter by status (active, resolved, false_positive) |
+| `predicted_after` | ISO 8601 datetime | No | Filter predictions made after this date |
+| `predicted_before` | ISO 8601 datetime | No | Filter predictions made before this date |
+| `api_name` | string | No | Text pattern to match in API name |
+| `gateway_id` | UUID | No | Filter by gateway ID |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "770e8400-e29b-41d4-a716-446655440002",
+      "api_id": "550e8400-e29b-41d4-a716-446655440000",
+      "api_name": "Payment Service API",
+      "prediction_type": "failure",
+      "predicted_at": "2026-03-12T15:30:00Z",
+      "predicted_time": "2026-03-14T10:00:00Z",
+      "confidence_score": 0.85,
+      "severity": "high",
+      "status": "active"
+    }
+  ],
+  "total": 8,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find high-confidence predictions (>80%) for production gateway
+GET /api/v1/predictions/search?confidence_min=0.8&gateway_id=<uuid>
+
+# Find critical failure predictions from last week
+GET /api/v1/predictions/search?prediction_type=failure&severity=critical&predicted_after=2026-03-05T00:00:00Z
+
+# Find active predictions with confidence between 70-90%
+GET /api/v1/predictions/search?status=active&confidence_min=0.7&confidence_max=0.9
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters (e.g., confidence out of range)
+- `500 Internal Server Error`: Server error
+
 
 #### Get Prediction Details
 
@@ -1076,6 +1266,73 @@ GET /api/v1/recommendations
   "page_size": 20
 }
 ```
+#### Search Recommendations
+
+```http
+GET /api/v1/optimization/recommendations/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across optimization recommendations with type, priority, status filters, and impact ranges. Use this endpoint when you need to combine multiple filters or search by specific criteria.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Filter by recommendation type (caching, query_optimization, resource_allocation, rate_limiting, connection_pooling, load_balancing, circuit_breaker, retry_policy, timeout_tuning, compression) |
+| `priority` | string | No | Filter by priority (critical, high, medium, low) |
+| `status` | string | No | Filter by status (pending, implemented, rejected, expired) |
+| `impact_min` | float | No | Minimum expected improvement percentage (0-100) |
+| `impact_max` | float | No | Maximum expected improvement percentage (0-100) |
+| `api_name` | string | No | Text pattern to match in API name |
+| `gateway_id` | UUID | No | Filter by gateway ID |
+| `created_after` | ISO 8601 datetime | No | Filter recommendations created after this date |
+| `created_before` | ISO 8601 datetime | No | Filter recommendations created before this date |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "880e8400-e29b-41d4-a716-446655440003",
+      "api_id": "550e8400-e29b-41d4-a716-446655440000",
+      "api_name": "User Service API",
+      "recommendation_type": "caching",
+      "title": "Implement Redis caching for user profile endpoints",
+      "priority": "high",
+      "estimated_impact": {
+        "improvement_percentage": 73.3,
+        "confidence": 0.9
+      },
+      "status": "pending",
+      "created_at": "2026-03-12T15:30:00Z"
+    }
+  ],
+  "total": 12,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find high-priority caching recommendations that are pending
+GET /api/v1/optimization/recommendations/search?type=caching&priority=high&status=pending
+
+# Find recommendations with high impact (>50%) from last week
+GET /api/v1/optimization/recommendations/search?impact_min=50&created_after=2026-03-05T00:00:00Z
+
+# Find all pending recommendations for APIs with "payment" in name
+GET /api/v1/optimization/recommendations/search?status=pending&api_name=payment
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters (e.g., impact out of range 0-100)
+- `500 Internal Server Error`: Server error
+
 
 #### Get Recommendation Details
 
@@ -1239,6 +1496,148 @@ GET /api/v1/recommendations/stats
 ```
 
 ---
+---
+
+### Security
+
+Manage security vulnerabilities and findings.
+
+#### Search Vulnerabilities
+
+```http
+GET /api/v1/security/vulnerabilities/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across security vulnerabilities with severity, type, status filters, and date ranges. Use this endpoint when you need to combine multiple filters or search by specific criteria.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `severity` | string | No | Filter by severity (critical, high, medium, low, informational) |
+| `type` | string | No | Filter by vulnerability type (sql_injection, xss, authentication_bypass, sensitive_data_exposure, etc.) |
+| `status` | string | No | Filter by status (open, in_progress, resolved, false_positive) |
+| `api_name` | string | No | Text pattern to match in API name |
+| `gateway_id` | UUID | No | Filter by gateway ID |
+| `discovered_after` | ISO 8601 datetime | No | Filter vulnerabilities discovered after this date |
+| `discovered_before` | ISO 8601 datetime | No | Filter vulnerabilities discovered before this date |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "990e8400-e29b-41d4-a716-446655440004",
+      "api_id": "550e8400-e29b-41d4-a716-446655440000",
+      "api_name": "Payment Service API",
+      "gateway_id": "660e8400-e29b-41d4-a716-446655440001",
+      "vulnerability_type": "sql_injection",
+      "severity": "critical",
+      "status": "open",
+      "title": "SQL Injection vulnerability in payment endpoint",
+      "description": "Unsanitized user input in payment query parameter",
+      "discovered_at": "2026-03-12T10:00:00Z",
+      "cvss_score": 9.8
+    }
+  ],
+  "total": 5,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find critical vulnerabilities this month affecting APIs with "user"
+GET /api/v1/security/vulnerabilities/search?severity=critical&discovered_after=2026-03-01T00:00:00Z&api_name=user
+
+# Find open SQL injection vulnerabilities
+GET /api/v1/security/vulnerabilities/search?type=sql_injection&status=open
+
+# Find all high/critical vulnerabilities for a specific gateway
+GET /api/v1/security/vulnerabilities/search?gateway_id=<uuid>&severity=critical,high
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters
+- `500 Internal Server Error`: Server error
+
+---
+
+### Compliance
+
+Manage compliance violations and audit findings.
+
+#### Search Compliance Violations
+
+```http
+GET /api/v1/compliance/violations/search
+```
+
+**Purpose**: Perform flexible multi-criteria search across compliance violations with standard, violation type, severity filters, and date ranges. Use this endpoint when you need to combine multiple filters or search by specific criteria.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `standard` | string | No | Filter by compliance standard (GDPR, HIPAA, PCI_DSS, SOC2, ISO27001, CCPA) |
+| `violation_type` | string | No | Filter by violation type (data_retention, encryption, access_control, audit_logging, etc.) |
+| `severity` | string | No | Filter by severity (critical, high, medium, low) |
+| `status` | string | No | Filter by status (open, in_progress, resolved, accepted_risk) |
+| `api_name` | string | No | Text pattern to match in API name |
+| `gateway_id` | UUID | No | Filter by gateway ID |
+| `discovered_after` | ISO 8601 datetime | No | Filter violations discovered after this date |
+| `discovered_before` | ISO 8601 datetime | No | Filter violations discovered before this date |
+| `page` | integer | No | Page number (default: 1) |
+| `page_size` | integer | No | Items per page (default: 20, max: 100) |
+
+**Response**: `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "aa0e8400-e29b-41d4-a716-446655440005",
+      "api_id": "550e8400-e29b-41d4-a716-446655440000",
+      "api_name": "User Service API",
+      "gateway_id": "660e8400-e29b-41d4-a716-446655440001",
+      "standard": "GDPR",
+      "violation_type": "data_retention",
+      "severity": "high",
+      "status": "open",
+      "title": "User data retained beyond 90-day limit",
+      "description": "Personal data is being retained for 180 days, exceeding GDPR requirements",
+      "discovered_at": "2026-03-10T14:00:00Z",
+      "remediation_deadline": "2026-03-24T14:00:00Z"
+    }
+  ],
+  "total": 8,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Example Queries**:
+
+```http
+# Find GDPR violations with high severity from last quarter
+GET /api/v1/compliance/violations/search?standard=GDPR&severity=high&discovered_after=2025-12-01T00:00:00Z
+
+# Find open data retention violations
+GET /api/v1/compliance/violations/search?violation_type=data_retention&status=open
+
+# Find all compliance violations for APIs with "payment" in name
+GET /api/v1/compliance/violations/search?api_name=payment
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid parameters
+- `500 Internal Server Error`: Server error
+
 
 ### Query
 

@@ -4,14 +4,24 @@ Provides LLM integration using LiteLLM with provider fallback chain
 for natural language query processing, prediction generation, and recommendations.
 """
 
+import asyncio
 import logging
 from typing import Any, Optional
 
 from litellm import acompletion, completion_cost
 
 from app.config import Settings
+from app.utils.circuit_breaker import CircuitBreaker, CircuitBreakerError
 
 logger = logging.getLogger(__name__)
+
+
+# Connection pool for LLM service (T087)
+_connection_semaphore: Optional[asyncio.Semaphore] = None
+_max_concurrent_requests = 10  # Maximum concurrent LLM requests
+
+# Circuit breaker for LLM service (T090)
+_llm_circuit_breaker: Optional[CircuitBreaker] = None
 
 
 class LLMService:
@@ -30,6 +40,24 @@ class LLMService:
         """
         self.settings = settings
         self._setup_providers()
+        self._init_connection_pool()
+    
+    def _init_connection_pool(self) -> None:
+        """Initialize connection pool semaphore (T087) and circuit breaker (T090)."""
+        global _connection_semaphore, _llm_circuit_breaker
+        
+        if _connection_semaphore is None:
+            _connection_semaphore = asyncio.Semaphore(_max_concurrent_requests)
+            logger.info(f"Initialized LLM connection pool with {_max_concurrent_requests} max concurrent requests")
+        
+        if _llm_circuit_breaker is None:
+            _llm_circuit_breaker = CircuitBreaker(
+                name="llm_service",
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                success_threshold=2,
+            )
+            logger.info("Initialized LLM circuit breaker")
 
     def _setup_providers(self) -> None:
         """Setup LLM provider fallback chain based on configuration."""
@@ -67,6 +95,22 @@ class LLMService:
                 "api_key": azure_key,
                 "api_base": azure_endpoint,
                 "api_version": "2024-02-15-preview",
+            })
+
+        # IBM watsonx
+        watsonx_api_key = getattr(self.settings, 'WATSONX_API_KEY', None)
+        watsonx_url = getattr(self.settings, 'WATSONX_URL', None)
+        watsonx_project_id = getattr(self.settings, 'WATSONX_PROJECT_ID', None)
+        if watsonx_api_key and watsonx_url and watsonx_project_id:
+            watsonx_model = self.settings.LLM_MODEL if self.settings.LLM_PROVIDER == "watsonx" else "ibm/granite-13b-chat-v2"
+            if not watsonx_model.startswith("watsonx/"):
+                watsonx_model = f"watsonx/{watsonx_model}"
+
+            self.providers.append({
+                "model": watsonx_model,
+                "api_key": watsonx_api_key,
+                "api_base": watsonx_url.rstrip("/"),
+                "project_id": watsonx_project_id,
             })
 
         # Ollama (local)
@@ -125,15 +169,29 @@ class LLMService:
             try:
                 logger.info(f"Attempting LLM completion with provider {i+1}/{len(self.providers)}: {provider['model']}")
 
-                response = await acompletion(
-                    model=provider["model"],
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    api_key=provider.get("api_key"),
-                    api_base=provider.get("api_base"),
-                    api_version=provider.get("api_version"),
-                )
+                # Wrap with circuit breaker (T090) and connection pool (T087)
+                async def _make_llm_call():
+                    semaphore = _connection_semaphore
+                    if semaphore is None:
+                        raise RuntimeError("LLM connection pool not initialized")
+
+                    async with semaphore:
+                        return await acompletion(
+                            model=provider["model"],
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            api_key=provider.get("api_key"),
+                            api_base=provider.get("api_base"),
+                            api_version=provider.get("api_version"),
+                            project_id=provider.get("project_id"),
+                        )
+
+                circuit_breaker = _llm_circuit_breaker
+                if circuit_breaker is None:
+                    raise RuntimeError("LLM circuit breaker not initialized")
+
+                response = await circuit_breaker.call_async(_make_llm_call)
 
                 # Calculate cost
                 cost = completion_cost(completion_response=response)
@@ -153,6 +211,11 @@ class LLMService:
                 logger.info(f"LLM completion result content: {result['content']}")
                 return result
 
+            except CircuitBreakerError as e:
+                last_error = e
+                logger.error(f"LLM circuit breaker is OPEN: {e}")
+                # Circuit breaker open - try next provider immediately
+                continue
             except Exception as e:
                 last_error = e
                 logger.warning(f"LLM provider {provider['model']} failed: {e}")
@@ -317,12 +380,21 @@ Provide a specific, actionable optimization recommendation."""
                     api_key=provider.get("api_key"),
                     api_base=provider.get("api_base"),
                     api_version=provider.get("api_version"),
+                    project_id=provider.get("project_id"),
                 )
+
+                response_text = ""
+                choices = getattr(response, "choices", None)
+                if choices:
+                    first_choice = choices[0]
+                    message = getattr(first_choice, "message", None)
+                    if message is not None:
+                        response_text = getattr(message, "content", "") or ""
 
                 results.append({
                     "model": provider["model"],
                     "status": "success",
-                    "response": response.choices[0].message.content,
+                    "response": response_text,
                 })
 
             except Exception as e:

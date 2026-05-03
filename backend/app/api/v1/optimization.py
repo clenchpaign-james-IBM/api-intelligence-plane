@@ -5,6 +5,7 @@ REST API endpoints for performance optimization recommendations.
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -1238,4 +1239,146 @@ async def get_recommendation_actions(
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get recommendation actions: {str(e)}",
+        )
+
+
+@router.get(
+    "/optimization/recommendations/search",
+    response_model=RecommendationListResponse,
+    summary="Search optimization recommendations with multiple filters",
+    description="Search optimization recommendations across all gateways with flexible multi-criteria filtering",
+)
+async def search_recommendations(
+    recommendation_type: Optional[RecommendationType] = Query(None, alias="type", description="Filter by recommendation type"),
+    priority: Optional[RecommendationPriority] = Query(None, description="Filter by priority"),
+    rec_status: Optional[RecommendationStatus] = Query(None, alias="status", description="Filter by status"),
+    impact_min: Optional[float] = Query(None, ge=0, le=100, description="Minimum expected impact percentage"),
+    impact_max: Optional[float] = Query(None, ge=0, le=100, description="Maximum expected impact percentage"),
+    api_name: Optional[str] = Query(None, description="Filter by API name pattern (case-insensitive wildcard)"),
+    gateway_id: Optional[UUID] = Query(None, description="Filter by gateway ID"),
+    created_after: Optional[datetime] = Query(None, description="Filter recommendations created after this date (ISO 8601)"),
+    created_before: Optional[datetime] = Query(None, description="Filter recommendations created before this date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size (max 100)"),
+) -> RecommendationListResponse:
+    """
+    Search optimization recommendations with multiple filters.
+    
+    Supports flexible filtering by:
+    - Recommendation type (caching, rate_limiting, connection_pooling, etc.)
+    - Priority (high, medium, low)
+    - Status (pending, in_progress, implemented, rejected)
+    - Expected impact range (0-100%)
+    - API name pattern (case-insensitive wildcard search)
+    - Gateway ID
+    - Creation date range
+    
+    All filters are optional and combined with AND logic.
+    Results are paginated with configurable page size (max 100).
+    
+    Args:
+        recommendation_type: Optional recommendation type filter
+        priority: Optional priority filter
+        rec_status: Optional status filter
+        impact_min: Optional minimum expected impact percentage
+        impact_max: Optional maximum expected impact percentage
+        api_name: Optional API name pattern (case-insensitive)
+        gateway_id: Optional gateway ID filter
+        created_after: Optional start date for creation range
+        created_before: Optional end date for creation range
+        page: Page number (1-based)
+        page_size: Number of items per page (max 100)
+        
+    Returns:
+        Paginated list of recommendations matching filters
+        
+    Raises:
+        HTTPException: If search fails
+    """
+    try:
+        logger.info(
+            f"Searching recommendations: type={recommendation_type}, priority={priority}, "
+            f"status={rec_status}, impact_min={impact_min}, impact_max={impact_max}, "
+            f"api_name={api_name}, gateway_id={gateway_id}, created_after={created_after}, "
+            f"created_before={created_before}, page={page}, page_size={page_size}"
+        )
+        
+        recommendation_repo = RecommendationRepository()
+        
+        # Call repository search method
+        recommendations, total = recommendation_repo.search_recommendations(
+            type=recommendation_type,
+            priority=priority,
+            status=rec_status,
+            impact_min=impact_min,
+            impact_max=impact_max,
+            api_name=api_name,
+            gateway_id=gateway_id,
+            created_after=created_after,
+            created_before=created_before,
+            page=page,
+            page_size=page_size,
+        )
+        
+        logger.info(f"Found {total} recommendations matching search criteria")
+        
+        # Convert to response models
+        api_repo = APIRepository()
+        recommendation_responses = []
+        
+        for rec in recommendations:
+            # Get API name
+            api = api_repo.get(str(rec.api_id))
+            api_name_str = api.name if api else "Unknown"
+            
+            ai_context = None
+            if rec.ai_context:
+                ai_context = AIContextResponse(
+                    performance_analysis=rec.ai_context.performance_analysis,
+                    implementation_guidance=rec.ai_context.implementation_guidance,
+                    prioritization=rec.ai_context.prioritization,
+                    generated_at=rec.ai_context.generated_at.isoformat() if rec.ai_context.generated_at else None,
+                )
+            
+            recommendation_responses.append(
+                RecommendationResponse(
+                    id=str(rec.id),
+                    gateway_id=str(rec.gateway_id),
+                    api_id=str(rec.api_id),
+                    api_name=api_name_str,
+                    recommendation_type=rec.recommendation_type.value,
+                    title=rec.title,
+                    description=rec.description,
+                    priority=rec.priority.value,
+                    estimated_impact=EstimatedImpactResponse(
+                        metric=rec.estimated_impact.metric,
+                        current_value=rec.estimated_impact.current_value,
+                        expected_value=rec.estimated_impact.expected_value,
+                        improvement_percentage=rec.estimated_impact.improvement_percentage,
+                        confidence=rec.estimated_impact.confidence,
+                    ),
+                    implementation_effort=rec.implementation_effort.value,
+                    implementation_steps=rec.implementation_steps,
+                    status=rec.status.value,
+                    implemented_at=rec.implemented_at.isoformat() if rec.implemented_at else None,
+                    cost_savings=rec.cost_savings,
+                    ai_context=ai_context,
+                    created_at=rec.created_at.isoformat(),
+                    updated_at=rec.updated_at.isoformat(),
+                    expires_at=rec.expires_at.isoformat() if rec.expires_at else None,
+                )
+            )
+        
+        return RecommendationListResponse(
+            recommendations=recommendation_responses,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to search recommendations: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search recommendations: {str(e)}",
         )

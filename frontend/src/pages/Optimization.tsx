@@ -14,6 +14,7 @@ import type {
   RecommendationStatus,
   RecommendationType
 } from '../types';
+import { useNotification } from '../contexts/NotificationContext';
 
 /**
  * Optimization Page
@@ -27,6 +28,7 @@ import type {
  * - Policy application to Gateway
  */
 const Optimization = () => {
+  const { showSuccess, showError, showWarning, showConfirm } = useNotification();
   const { gatewayId } = useParams<{ gatewayId?: string }>();
   const [selectedGatewayId, setSelectedGatewayId] = useState<string | null>(gatewayId || null);
   const [selectedPriority, setSelectedPriority] = useState<RecommendationPriority | 'all'>('all');
@@ -72,13 +74,17 @@ const Optimization = () => {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
       if (data.requires_manual_configuration) {
-        alert(`Manual Configuration Required:\n\n${data.message}\n\nInstructions:\n${data.instructions?.join('\n') || 'See recommendation details'}`);
+        showWarning(
+          'Manual Configuration Required',
+          `${data.message}\n\nInstructions:\n${data.instructions?.join('\n') || 'See recommendation details'}`,
+          10000
+        );
       } else {
-        alert('Policy applied to Gateway successfully! The policy has been created or updated in the Gateway.');
+        showSuccess('Policy Applied', 'The policy has been created or updated in the Gateway.');
       }
     },
     onError: (error: any) => {
-      alert(`Failed to apply policy to Gateway: ${error.message || 'Unknown error'}`);
+      showError('Apply Failed', error.message || 'Unknown error');
     },
   });
 
@@ -88,10 +94,10 @@ const Optimization = () => {
       api.recommendations.removeFromGateway(gatewayId, recommendationId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
-      alert('Policy removed from Gateway successfully!');
+      showSuccess('Policy Removed', 'Policy removed from Gateway successfully');
     },
     onError: (error: any) => {
-      alert(`Failed to remove policy from Gateway: ${error.message || 'Unknown error'}`);
+      showError('Remove Failed', error.message || 'Unknown error');
     },
   });
 
@@ -101,13 +107,18 @@ const Optimization = () => {
       api.recommendations.validate(gatewayId, recommendationId, validationWindowHours || 24),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
-      const message = data.success
-        ? `Validation Successful!\n\nExpected: ${data.expected_improvement}%\nActual: ${data.actual_improvement}%\nImprovement: ${data.improvement_percentage}%\nConfidence: ${(data.confidence_score * 100).toFixed(1)}%`
-        : `Validation Failed:\n\n${data.message}`;
-      alert(message);
+      if (data.success) {
+        showSuccess(
+          'Validation Successful',
+          `Expected: ${data.expected_improvement}%\nActual: ${data.actual_improvement}%\nImprovement: ${data.improvement_percentage}%\nConfidence: ${(data.confidence_score * 100).toFixed(1)}%`,
+          8000
+        );
+      } else {
+        showError('Validation Failed', data.message);
+      }
     },
     onError: (error: any) => {
-      alert(`Failed to validate recommendation: ${error.message || 'Unknown error'}`);
+      showError('Validation Failed', error.message || 'Unknown error');
     },
   });
 
@@ -320,10 +331,14 @@ const Optimization = () => {
                   setSelectedRecommendation(null);
                 }}
                 onRemove={(gatewayId, recommendationId) => {
-                  if (confirm('Are you sure you want to remove this policy from the gateway?')) {
-                    removeMutation.mutate({ gatewayId, recommendationId });
-                    setSelectedRecommendation(null);
-                  }
+                  showConfirm(
+                    'Remove Policy',
+                    'Are you sure you want to remove this policy from the gateway?',
+                    () => {
+                      removeMutation.mutate({ gatewayId, recommendationId });
+                      setSelectedRecommendation(null);
+                    }
+                  );
                 }}
                 onValidate={(gatewayId, recommendationId) => {
                   validateMutation.mutate({ gatewayId, recommendationId });

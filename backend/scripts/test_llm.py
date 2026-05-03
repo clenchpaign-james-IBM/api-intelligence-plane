@@ -242,7 +242,8 @@ async def main() -> None:
         print("  - OPENAI_API_KEY")
         print("  - ANTHROPIC_API_KEY")
         print("  - GOOGLE_API_KEY")
-        print("  - AZURE_API_KEY + AZURE_API_BASE + AZURE_API_VERSION")
+        print("  - AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_DEPLOYMENT")
+        print("  - WATSONX_API_KEY + WATSONX_URL + WATSONX_PROJECT_ID")
         print("  - OLLAMA_BASE_URL")
         return
 
