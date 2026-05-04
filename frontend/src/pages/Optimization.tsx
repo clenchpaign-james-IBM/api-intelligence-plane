@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { Zap, TrendingUp, Filter } from 'lucide-react';
+import { Zap, TrendingUp, Filter, RefreshCw } from 'lucide-react';
 import Loading from '../components/common/Loading';
 import Error from '../components/common/Error';
 import GatewaySelector from '../components/common/GatewaySelector';
@@ -15,6 +15,9 @@ import type {
   RecommendationType
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
+import { useScan } from '../contexts/ScanContext';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 /**
  * Optimization Page
@@ -29,15 +32,18 @@ import { useNotification } from '../contexts/NotificationContext';
  */
 const Optimization = () => {
   const { showSuccess, showError, showWarning, showConfirm } = useNotification();
+  const { startScan, updateProgress, completeScan, getScanStateForPage } = useScan();
   const { gatewayId } = useParams<{ gatewayId?: string }>();
   const [selectedGatewayId, setSelectedGatewayId] = useState<string | null>(gatewayId || null);
   const [selectedPriority, setSelectedPriority] = useState<RecommendationPriority | 'all'>('all');
   const [selectedStatus, setSelectedStatus] = useState<RecommendationStatus | 'all'>('all');
   const [selectedType, setSelectedType] = useState<RecommendationType | 'all'>('all');
   const [selectedRecommendation, setSelectedRecommendation] = useState<OptimizationRecommendation | null>(null);
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
   
   const queryClient = useQueryClient();
+
+  // Get scan state from context
+  const { isScanning, scanProgress } = getScanStateForPage('optimization', selectedGatewayId);
 
   // Handle gateway selection
   const handleGatewayChange = (newGatewayId: string | null) => {
@@ -66,6 +72,76 @@ const Optimization = () => {
     staleTime: 0, // Always fetch fresh data
     refetchInterval: 60000,
   });
+
+  // Fetch APIs for the selected gateway
+  const { data: apisData } = useQuery({
+    queryKey: ['apis', selectedGatewayId],
+    queryFn: () => {
+      if (!selectedGatewayId) return { items: [] };
+      return api.apis.list({ gateway_id: selectedGatewayId, page_size: 1000 });
+    },
+    enabled: !!selectedGatewayId,
+  });
+
+  const apis = apisData?.items || [];
+
+  // Handle manual scan - generate recommendations for all APIs in selected gateway
+  const handleManualScan = async () => {
+    if (!selectedGatewayId) {
+      showError('No Gateway Selected', 'Please select a gateway to scan');
+      return;
+    }
+
+    startScan('optimization', selectedGatewayId, apis.length);
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+      let totalRecommendations = 0;
+
+      // Generate recommendations for each API in the selected gateway
+      for (let i = 0; i < apis.length; i++) {
+        const apiItem = apis[i];
+        updateProgress('optimization', selectedGatewayId, i + 1);
+
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/api/v1/gateways/${selectedGatewayId}/optimization/recommendations/generate?api_id=${apiItem.id}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+          
+          if (response.ok) {
+            const data = await response.json();
+            totalRecommendations += data.recommendations_generated || 0;
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          console.error(`Failed to generate recommendations for API ${apiItem.name}:`, error);
+          failCount++;
+        }
+      }
+
+      // Refresh data
+      await queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+      await queryClient.invalidateQueries({ queryKey: ['recommendation-stats'] });
+
+      showSuccess(
+        'Recommendation Generation Complete',
+        `Total APIs: ${apis.length}\nSuccessful: ${successCount}\nFailed: ${failCount}\nRecommendations Generated: ${totalRecommendations}`,
+        8000
+      );
+    } catch (error) {
+      console.error('Recommendation generation failed:', error);
+      showError('Generation Failed', 'Failed to complete recommendation generation. Please try again.');
+    } finally {
+      completeScan('optimization', selectedGatewayId);
+    }
+  };
 
   // Apply policy mutation (creates or updates policy in Gateway)
   const applyMutation = useMutation({
@@ -168,19 +244,13 @@ const Optimization = () => {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => {
-                setIsGenerating(true);
-                refetch().finally(() => setIsGenerating(false));
-              }}
-              disabled={isGenerating}
-              className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                isGenerating
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              } text-white`}
+              onClick={handleManualScan}
+              disabled={isScanning || !selectedGatewayId}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
+              title={!selectedGatewayId ? 'Select a gateway to scan' : 'Generate recommendations for all APIs in selected gateway'}
             >
-              <TrendingUp className="w-5 h-5" />
-              {isGenerating ? 'Refreshing...' : 'Refresh List'}
+              <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
+              {isScanning ? `Scanning ${scanProgress?.current}/${scanProgress?.total}...` : 'Manual Scan'}
             </button>
           </div>
         </div>

@@ -293,6 +293,106 @@ async def list_gateway_predictions(
             detail=f"Failed to retrieve predictions: {str(e)}",
         )
 
+@router.post(
+    "/gateways/{gateway_id}/predictions/generate",
+    response_model=dict,
+    summary="Generate predictions for an API within a gateway",
+)
+async def generate_gateway_predictions(
+    gateway_id: UUID,
+    api_id: UUID = Query(..., description="API ID to generate predictions for"),
+    min_confidence: float = Query(0.7, ge=0, le=1, description="Minimum confidence threshold"),
+) -> dict:
+    """
+    Generate AI-driven failure predictions for a specific API within a gateway.
+
+    Args:
+        gateway_id: Gateway UUID (required)
+        api_id: API UUID
+        min_confidence: Minimum confidence threshold (0-1)
+
+    Returns:
+        Generation results with predictions
+
+    Raises:
+        HTTPException: If gateway or API not found or generation fails
+    """
+    try:
+        # Verify gateway exists
+        from app.db.repositories.gateway_repository import GatewayRepository
+        gateway_repo = GatewayRepository()
+        gateway = gateway_repo.get(str(gateway_id))
+        
+        if not gateway:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {gateway_id} not found",
+            )
+        
+        # Verify API belongs to gateway
+        api_repo = APIRepository()
+        api = api_repo.get(str(api_id))
+        
+        if not api:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"API {api_id} not found",
+            )
+        
+        if str(api.gateway_id) != str(gateway_id):
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"API {api_id} not found in gateway {gateway_id}",
+            )
+        
+        prediction_repo = PredictionRepository()
+        metrics_repo = MetricsRepository()
+
+        from app.services.prediction_service import PredictionService
+        from app.services.llm_service import LLMService
+        from app.config import Settings
+
+        settings = Settings()
+        llm_service = LLMService(settings)
+
+        prediction_service = PredictionService(
+            prediction_repository=prediction_repo,
+            metrics_repository=metrics_repo,
+            api_repository=api_repo,
+            llm_service=llm_service,
+        )
+
+        predictions = await prediction_service.generate_predictions_for_api(
+            gateway_id=gateway_id,
+            api_id=api_id,
+            min_confidence=min_confidence,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Generated {len(predictions)} prediction(s) for API {api_id}",
+            "predictions_generated": len(predictions),
+            "predictions": [
+                {
+                    "id": str(p.id),
+                    "prediction_type": p.prediction_type.value,
+                    "severity": p.severity.value,
+                    "confidence_score": p.confidence_score,
+                }
+                for p in predictions
+            ],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate predictions for API {api_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate predictions: {str(e)}",
+        )
+
+
 
 @router.get(
     "/gateways/{gateway_id}/predictions/{prediction_id}",

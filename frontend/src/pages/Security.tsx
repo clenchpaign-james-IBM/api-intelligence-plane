@@ -6,16 +6,23 @@
  */
 
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 import type { API, Vulnerability, SecurityPosture, VulnerabilitySeverity, VulnerabilityStatus } from '../types';
 import { securityService, getSecurityPosture } from '../services/security';
 import { api } from '../services/api';
 import { APISecurityCard } from '../components/security/APISecurityCard';
 import { SecurityDashboard } from '../components/security/SecurityDashboard';
 import GatewaySelector from '../components/common/GatewaySelector';
+import { useNotification } from '../contexts/NotificationContext';
+import { useScan } from '../contexts/ScanContext';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export const Security: React.FC = () => {
+  const { showSuccess, showError } = useNotification();
+  const { startScan, updateProgress, completeScan, getScanStateForPage } = useScan();
   const { gatewayId } = useParams<{ gatewayId?: string }>();
   const [selectedGatewayId, setSelectedGatewayId] = useState<string | null>(gatewayId || null);
   const [selectedTab, setSelectedTab] = useState<'by-api' | 'overview'>('overview');
@@ -23,6 +30,10 @@ export const Security: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<VulnerabilityStatus | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<string | 'all'>('all');
   const [sortBy, setSortBy] = useState<'risk' | 'name' | 'vulnerabilities'>('risk');
+  const queryClient = useQueryClient();
+
+  // Get scan state from context
+  const { isScanning, scanProgress } = getScanStateForPage('security', selectedGatewayId);
 
   // Handle gateway selection
   const handleGatewayChange = (newGatewayId: string | null) => {
@@ -82,6 +93,59 @@ export const Security: React.FC = () => {
 
   // Extract APIs array from response
   const apis = apisData?.items || [];
+
+  // Handle manual scan - scan all APIs in the selected gateway
+  const handleManualScan = async () => {
+    if (!selectedGatewayId) {
+      showError('No Gateway Selected', 'Please select a gateway to scan');
+      return;
+    }
+
+    startScan('security', selectedGatewayId, apis.length);
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      // Scan each API in the selected gateway
+      for (let i = 0; i < apis.length; i++) {
+        const apiItem = apis[i];
+        updateProgress('security', selectedGatewayId, i + 1);
+
+        try {
+          await fetch(`${API_BASE_URL}/api/v1/gateways/${selectedGatewayId}/security/scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gateway_id: selectedGatewayId,
+              api_id: apiItem.id,
+            }),
+          });
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to scan API ${apiItem.name}:`, error);
+          failCount++;
+        }
+      }
+
+      // Refresh data
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['vulnerabilities'] }),
+        queryClient.invalidateQueries({ queryKey: ['security-posture'] }),
+      ]);
+
+      showSuccess(
+        'Security Scan Complete',
+        `Total APIs: ${apis.length}\nSuccessful: ${successCount}\nFailed: ${failCount}`,
+        8000
+      );
+    } catch (error) {
+      console.error('Security scan failed:', error);
+      showError('Scan Failed', 'Failed to complete security scan. Please try again.');
+    } finally {
+      completeScan('security', selectedGatewayId);
+    }
+  };
 
   // Group vulnerabilities by API
   const apiSecurityData = React.useMemo(() => {
@@ -172,10 +236,23 @@ export const Security: React.FC = () => {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">API Security Center</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Monitor security vulnerabilities across all APIs and track automated remediation
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">API Security Center</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Monitor security vulnerabilities across all APIs and track automated remediation
+            </p>
+          </div>
+          <button
+            onClick={handleManualScan}
+            disabled={isScanning || !selectedGatewayId}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
+            title={!selectedGatewayId ? 'Select a gateway to scan' : 'Scan all APIs in selected gateway for security vulnerabilities'}
+          >
+            <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
+            {isScanning ? `Scanning ${scanProgress?.current}/${scanProgress?.total}...` : 'Manual Scan'}
+          </button>
+        </div>
       </div>
       {/* Gateway Selector */}
       <div className="mb-6">
