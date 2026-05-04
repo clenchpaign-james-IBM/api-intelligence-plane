@@ -397,8 +397,14 @@ const Optimization = () => {
               <RecommendationDetail
                 recommendation={selectedRecommendation}
                 onApply={(gatewayId, recommendationId) => {
-                  applyMutation.mutate({ gatewayId, recommendationId });
-                  setSelectedRecommendation(null);
+                  applyMutation.mutate(
+                    { gatewayId, recommendationId },
+                    {
+                      onSuccess: () => {
+                        setSelectedRecommendation(null);
+                      },
+                    }
+                  );
                 }}
                 onRemove={(gatewayId, recommendationId) => {
                   showConfirm(
@@ -413,17 +419,9 @@ const Optimization = () => {
                 onValidate={(gatewayId, recommendationId) => {
                   validateMutation.mutate({ gatewayId, recommendationId });
                 }}
+                onClose={() => setSelectedRecommendation(null)}
+                isApplying={applyMutation.isPending}
               />
-
-              {/* Close Button */}
-              <div className="mt-6">
-                <button
-                  onClick={() => setSelectedRecommendation(null)}
-                  className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>
         </div>

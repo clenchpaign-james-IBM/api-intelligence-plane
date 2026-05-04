@@ -48,6 +48,15 @@ export const Compliance: React.FC = () => {
   // Get scan state from context
   const { isScanning, scanProgress } = getScanStateForPage('compliance', selectedGatewayId);
 
+  // Fetch all gateways for "All Gateways" option
+  const { data: gatewaysData } = useQuery({
+    queryKey: ['gateways'],
+    queryFn: () => gatewayService.list({ limit: 100 }),
+    refetchInterval: 60000,
+  });
+
+  const allGateways = gatewaysData?.items || [];
+
   // Handle gateway selection
   const handleGatewayChange = (newGatewayId: string | null) => {
     setSelectedGatewayId(newGatewayId);
@@ -67,15 +76,6 @@ export const Compliance: React.FC = () => {
     },
     refetchInterval: 30000,
   });
-
-  // Fetch all gateways for "All Gateways" option
-  const { data: gatewaysData } = useQuery({
-    queryKey: ['gateways'],
-    queryFn: () => gatewayService.list({ limit: 100 }),
-    refetchInterval: 60000,
-  });
-
-  const allGateways = gatewaysData?.items || [];
 
   // Fetch all compliance violations (from all gateways if "All" is selected)
   const {
@@ -433,33 +433,8 @@ export const Compliance: React.FC = () => {
         />
       </div>
 
-      {/* Show message if no gateway selected */}
-      {!selectedGatewayId && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-          <svg
-            className="mx-auto h-12 w-12 text-blue-400 mb-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <h3 className="text-lg font-semibold text-blue-900 mb-2">
-            Select a Gateway to View Compliance Details
-          </h3>
-          <p className="text-blue-700">
-            Please select a specific gateway from the dropdown above to view API compliance violations and generate audit reports.
-          </p>
-        </div>
-      )}
-
-      {/* Tabs - Only show if gateway is selected */}
-      {selectedGatewayId && (
+      {/* Tabs */}
+      {(selectedGatewayId || allGateways.length > 0) && (
         <>
           <div className="mb-6 border-b border-gray-200">
             <nav className="-mb-px flex space-x-8">

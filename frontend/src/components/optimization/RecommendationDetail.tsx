@@ -3,22 +3,28 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CheckCircle, XCircle, PlayCircle, Trash2, Clock } from 'lucide-react';
 import { OptimizationRecommendation, OptimizationAction } from '../../types/optimization';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 
 interface Props {
   recommendation: OptimizationRecommendation;
   onApply?: (gatewayId: string, recommendationId: string) => void;
   onRemove?: (gatewayId: string, recommendationId: string) => void;
   onValidate?: (gatewayId: string, recommendationId: string) => void;
+  onClose?: () => void;
+  isApplying?: boolean;
 }
 
 export const RecommendationDetail: React.FC<Props> = ({
   recommendation,
   onApply,
   onRemove,
-  onValidate
+  onValidate,
+  onClose,
+  isApplying = false
 }) => {
   const { ai_context, remediation_actions } = recommendation;
   const [showActions, setShowActions] = useState(false);
+  const [showRemediateModal, setShowRemediateModal] = useState(false);
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -146,11 +152,22 @@ export const RecommendationDetail: React.FC<Props> = ({
         <div className="flex gap-3 flex-wrap">
           {recommendation.gateway_id && recommendation.status === 'pending' && onApply && (
             <button
-              onClick={() => onApply(recommendation.gateway_id!, recommendation.id)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              onClick={() => setShowRemediateModal(true)}
+              disabled={isApplying}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
             >
               <PlayCircle className="w-4 h-4" />
-              Remediate
+              {isApplying ? 'Remediating...' : 'Remediate'}
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              disabled={isApplying}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              Close
             </button>
           )}
             
@@ -252,6 +269,22 @@ export const RecommendationDetail: React.FC<Props> = ({
           )}
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={showRemediateModal}
+        title="Confirm Remediation"
+        message={`Are you sure you want to remediate "${recommendation.title}"?`}
+        confirmLabel="Yes, Remediate"
+        cancelLabel="Cancel"
+        onConfirm={() => onApply?.(recommendation.gateway_id, recommendation.id)}
+        onCancel={() => {
+          if (!isApplying) {
+            setShowRemediateModal(false);
+          }
+        }}
+        isProcessing={isApplying}
+        processingMessage="Applying remediation actions..."
+      />
 
       {/* Validation Results */}
       {recommendation.validation_results && (
