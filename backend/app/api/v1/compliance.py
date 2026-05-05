@@ -457,6 +457,246 @@ async def generate_gateway_audit_report(
 
 
 @router.get(
+    "/gateways/{gateway_id}/compliance/reports/audit/{report_id}/export",
+    status_code=status.HTTP_200_OK,
+    summary="Export audit report",
+    description="Export audit report in specified format (JSON, HTML, or PDF)",
+)
+async def export_gateway_audit_report(
+    gateway_id: UUID,
+    report_id: str,
+    format: str = Query("json", regex="^(json|html|pdf)$", description="Export format"),
+    compliance_service: ComplianceService = Depends(get_compliance_service),
+):
+    """Export audit report in specified format.
+    
+    Args:
+        gateway_id: Gateway UUID (required)
+        report_id: Report identifier
+        format: Export format (json, html, pdf)
+        compliance_service: Compliance service dependency
+        
+    Returns:
+        Report in requested format
+        
+    Raises:
+        HTTPException: If gateway not found or export fails
+    """
+    try:
+        from fastapi.responses import JSONResponse, HTMLResponse, Response
+        
+        # Verify gateway exists
+        from app.db.repositories.gateway_repository import GatewayRepository
+        gateway_repo = GatewayRepository()
+        gateway = gateway_repo.get(str(gateway_id))
+        
+        if not gateway:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {gateway_id} not found",
+            )
+        
+        logger.info(f"Exporting audit report {report_id} for gateway {gateway_id} as {format}")
+        
+        # For now, we'll generate a new report since we don't store reports
+        # In production, you'd retrieve the stored report by report_id
+        report = await compliance_service.generate_audit_report(
+            gateway_id=gateway_id,
+            api_ids=None,
+            standards=None,
+            start_date=None,
+            end_date=None,
+        )
+        
+        if format == "html":
+            # Generate HTML report BEFORE converting to JSON-serializable
+            # (so we can access the original data structure)
+            try:
+                # Debug: Log full report
+                logger.info(f"=== FULL REPORT ===")
+                logger.info(f"Report type: {type(report)}")
+                logger.info(f"Report keys: {list(report.keys())}")
+                for key, value in report.items():
+                    logger.info(f"  {key}: {type(value)} = {value if not isinstance(value, (list, dict)) else f'<{type(value).__name__} with {len(value)} items>'}")
+                
+                # Extract values with proper defaults and explicit logging
+                compliance_posture = report.get('compliance_posture', {})
+                logger.info(f"compliance_posture type: {type(compliance_posture)}, value: {compliance_posture}")
+                
+                violations_by_severity = report.get('violations_by_severity', {})
+                logger.info(f"violations_by_severity: {violations_by_severity}")
+                
+                violations_by_standard = report.get('violations_by_standard', {})
+                logger.info(f"violations_by_standard: {violations_by_standard}")
+                
+                report_period = report.get('report_period', {})
+                logger.info(f"report_period: {report_period}")
+                
+                report_id_str = str(report.get('report_id', 'N/A'))
+                logger.info(f"report_id_str: {report_id_str}")
+                
+                generated_at_str = str(report.get('generated_at', 'N/A'))
+                logger.info(f"generated_at_str: {generated_at_str}")
+                
+                executive_summary = report.get('executive_summary', 'No summary available')
+                logger.info(f"executive_summary: {executive_summary}")
+                
+                # Build standards table rows
+                standards_rows = ""
+                if violations_by_standard:
+                    for std, count in violations_by_standard.items():
+                        standards_rows += f"<tr><td>{std.upper()}</td><td>{count}</td></tr>"
+                else:
+                    standards_rows = "<tr><td colspan='2'>No violations by standard</td></tr>"
+                
+                # Build recommendations list
+                recommendations_items = ""
+                recommendations = report.get('recommendations', [])
+                if recommendations:
+                    for rec in recommendations:
+                        recommendations_items += f"<li>{rec}</li>"
+                else:
+                    recommendations_items = "<li>No recommendations available</li>"
+                
+                html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Compliance Audit Report - {report_id_str}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        h2 {{ color: #666; margin-top: 30px; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+        th {{ background-color: #f2f2f2; }}
+        .critical {{ color: #dc2626; font-weight: bold; }}
+        .high {{ color: #ea580c; font-weight: bold; }}
+        .medium {{ color: #ca8a04; font-weight: bold; }}
+        .low {{ color: #2563eb; font-weight: bold; }}
+        .summary {{ background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+    </style>
+</head>
+<body>
+    <h1>Compliance Audit Report</h1>
+    <p><strong>Report ID:</strong> {report_id_str}</p>
+    <p><strong>Generated:</strong> {generated_at_str}</p>
+    <p><strong>Period:</strong> {report_period.get('start', 'N/A')} to {report_period.get('end', 'N/A')}</p>
+    
+    <div class="summary">
+        <h2>Executive Summary</h2>
+        <p>{executive_summary}</p>
+    </div>
+    
+    <h2>Compliance Summary</h2>
+    <table>
+        <tr>
+            <th>Metric</th>
+            <th>Value</th>
+        </tr>
+        <tr>
+            <td>Total Violations</td>
+            <td>{compliance_posture.get('total_violations', 0)}</td>
+        </tr>
+        <tr>
+            <td>Open Violations</td>
+            <td>{compliance_posture.get('open_violations', 0)}</td>
+        </tr>
+        <tr>
+            <td>Remediated Violations</td>
+            <td>{compliance_posture.get('remediated_violations', 0)}</td>
+        </tr>
+        <tr>
+            <td>Remediation Rate</td>
+            <td>{compliance_posture.get('remediation_rate', 0)}%</td>
+        </tr>
+    </table>
+    
+    <h2>Violations by Severity</h2>
+    <table>
+        <tr>
+            <th>Severity</th>
+            <th>Count</th>
+        </tr>
+        <tr class="critical">
+            <td>Critical</td>
+            <td>{violations_by_severity.get('critical', 0)}</td>
+        </tr>
+        <tr class="high">
+            <td>High</td>
+            <td>{violations_by_severity.get('high', 0)}</td>
+        </tr>
+        <tr class="medium">
+            <td>Medium</td>
+            <td>{violations_by_severity.get('medium', 0)}</td>
+        </tr>
+        <tr class="low">
+            <td>Low</td>
+            <td>{violations_by_severity.get('low', 0)}</td>
+        </tr>
+    </table>
+    
+    <h2>Violations by Standard</h2>
+    <table>
+        <tr>
+            <th>Standard</th>
+            <th>Count</th>
+        </tr>
+        {standards_rows}
+    </table>
+    
+    <h2>Recommendations</h2>
+    <ol>
+        {recommendations_items}
+    </ol>
+</body>
+</html>"""
+                return HTMLResponse(content=html_content)
+            except Exception as html_error:
+                logger.error(f"Failed to generate HTML: {str(html_error)}")
+                raise
+        
+        # Convert UUIDs and datetimes to strings for JSON serialization
+        from datetime import datetime
+        
+        def convert_to_json_serializable(obj):
+            """Recursively convert UUID and datetime objects to strings."""
+            if isinstance(obj, UUID):
+                return str(obj)
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            elif isinstance(obj, dict):
+                return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_to_json_serializable(item) for item in obj]
+            return obj
+        
+        report_dict: dict = convert_to_json_serializable(report)  # type: ignore
+        report = report_dict
+        
+        if format == "json":
+            return JSONResponse(content=report)
+        
+        elif format == "pdf":
+            # For PDF, return HTML with a note that PDF generation requires additional setup
+            # In production, you'd use a library like WeasyPrint or ReportLab
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "PDF export not yet implemented",
+                    "message": "PDF generation requires additional dependencies. Use HTML or JSON export instead.",
+                    "alternatives": ["json", "html"]
+                }
+            )
+    
+    except Exception as e:
+        logger.error(f"Failed to export audit report: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export audit report: {str(e)}",
+        )
+
+
+@router.get(
     "/gateways/{gateway_id}/compliance/violations/{violation_id}",
     response_model=ComplianceViolation,
     status_code=status.HTTP_200_OK,

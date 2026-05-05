@@ -338,14 +338,37 @@ export const resolveViolation = async (
  * Export audit report in specified format
  */
 export const exportAuditReport = async (
+  gatewayId: string,
   reportId: string,
-  format: 'pdf' | 'csv' | 'json' | 'html' = 'pdf'
+  format: 'pdf' | 'json' | 'html' = 'json'
 ): Promise<Blob> => {
-  const response = await apiClient.get(`/compliance/reports/audit/${reportId}/export`, {
-    params: { format },
-    responseType: 'blob',
-  });
-  return response.data;
+  try {
+    const response = await apiClient.get(
+      `/api/v1/gateways/${gatewayId}/compliance/reports/audit/${reportId}/export`,
+      {
+        params: { format },
+        responseType: format === 'json' ? 'json' : 'blob',
+      }
+    );
+    
+    // For JSON, convert to blob
+    if (format === 'json') {
+      const jsonStr = JSON.stringify(response.data, null, 2);
+      return new Blob([jsonStr], { type: 'application/json' });
+    }
+    
+    // For HTML and PDF, response.data should already be a Blob
+    if (response.data instanceof Blob) {
+      return response.data;
+    }
+    
+    // Fallback: if response is not a Blob, convert it
+    const contentType = format === 'html' ? 'text/html' : 'application/pdf';
+    return new Blob([response.data], { type: contentType });
+  } catch (error: any) {
+    console.error('Failed to export audit report:', error);
+    throw new Error(error.response?.data?.detail || error.message || 'Failed to export audit report');
+  }
 };
 
 // Made with Bob

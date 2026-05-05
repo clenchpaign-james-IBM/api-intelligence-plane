@@ -82,10 +82,10 @@ export const AuditReportGenerator: React.FC<AuditReportGeneratorProps> = ({
   };
 
   const handleExportReport = async (format: 'json' | 'pdf' | 'html') => {
-    if (!generatedReport) return;
+    if (!generatedReport || !gatewayId) return;
 
     try {
-      const blob = await exportAuditReport(generatedReport.report_id, format);
+      const blob = await exportAuditReport(gatewayId, generatedReport.report_id, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -94,8 +94,13 @@ export const AuditReportGenerator: React.FC<AuditReportGeneratorProps> = ({
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
-      setError(`Failed to export report: ${err}`);
+    } catch (err: any) {
+      // Check if it's a PDF not implemented error
+      if (err.response?.status === 501) {
+        setError('PDF export is not yet implemented. Please use HTML or JSON export instead.');
+      } else {
+        setError(`Failed to export report: ${err.message || err}`);
+      }
     }
   };
 
