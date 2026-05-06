@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import type { API, ComplianceStandard, AuditReport } from '../../types';
+import { validateAuditReport } from '../../types';
 import { generateAuditReport, exportAuditReport } from '../../services/compliance';
 
 interface AuditReportGeneratorProps {
@@ -27,8 +28,11 @@ export const AuditReportGenerator: React.FC<AuditReportGeneratorProps> = ({
   const [periodEnd, setPeriodEnd] = useState<string>('');
   const [includeResolved, setIncludeResolved] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [generatedReport, setGeneratedReport] = useState<AuditReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const allStandards: ComplianceStandard[] = ['GDPR', 'HIPAA', 'SOC2', 'PCI_DSS', 'ISO_27001'];
 
@@ -68,39 +72,109 @@ export const AuditReportGenerator: React.FC<AuditReportGeneratorProps> = ({
         end_date: periodEnd || undefined,
       });
 
-      // Backend returns the report directly, not wrapped in a 'report' field
-      setGeneratedReport(response as any);
-      
-      if (onReportGenerated) {
-        onReportGenerated();
+      // Validate response structure before using it
+      try {
+        const validatedReport = validateAuditReport(response);
+        setGeneratedReport(validatedReport);
+        
+        if (onReportGenerated) {
+          onReportGenerated();
+        }
+      } catch (validationError) {
+        console.error('Report validation failed:', validationError);
+        setError(`Invalid report structure received from server: ${validationError}`);
       }
     } catch (err) {
-      setError(`Failed to generate report: ${err}`);
+      console.error('Failed to generate report:', err);
+      setError(`Failed to generate report: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleExportReport = async (format: 'json' | 'pdf' | 'html') => {
+  const handleExportReport = async (format: 'json' | 'pdf' | 'html', retryCount = 0) => {
     if (!generatedReport || !gatewayId) return;
 
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY = 1000; // 1 second
+
+    setIsExporting(true);
+    setError(null);
+    setSuccess(null);
+    setExportProgress(`Preparing ${format.toUpperCase()} export...`);
+    
+    let url: string | null = null;
+    
     try {
+      // Show progress
+      setExportProgress(`Downloading ${format.toUpperCase()} report...`);
+      
       const blob = await exportAuditReport(gatewayId, generatedReport.report_id, format);
-      const url = window.URL.createObjectURL(blob);
+      
+      // Validate blob
+      if (!blob || blob.size === 0) {
+        throw new Error('Received empty report file from server');
+      }
+      
+      setExportProgress('Preparing download...');
+      
+      // Create download
+      url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `audit-report-${generatedReport.report_id}.${format}`;
+      const timestamp = new Date().toISOString().split('T')[0];
+      a.download = `audit-report-${generatedReport.report_id}-${timestamp}.${format}`;
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      
+      // Show success message
+      setSuccess(`Report exported successfully as ${format.toUpperCase()}`);
+      setExportProgress(null);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccess(null), 3000);
+      
     } catch (err: any) {
-      // Check if it's a PDF not implemented error
+      console.error('Export error:', err);
+      
+      // Handle specific error cases
       if (err.response?.status === 501) {
         setError('PDF export is not yet implemented. Please use HTML or JSON export instead.');
+        setExportProgress(null);
+      } else if (err.response?.status === 404) {
+        setError('Report not found. Please generate a new report.');
+        setExportProgress(null);
+      } else if (err.response?.status === 500) {
+        // Retry on server errors
+        if (retryCount < MAX_RETRIES) {
+          setExportProgress(`Server error. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return handleExportReport(format, retryCount + 1);
+        } else {
+          setError('Server error while exporting report. Please try again later.');
+          setExportProgress(null);
+        }
+      } else if (err.message?.includes('network') || err.message?.includes('fetch')) {
+        // Retry on network errors
+        if (retryCount < MAX_RETRIES) {
+          setExportProgress(`Network error. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return handleExportReport(format, retryCount + 1);
+        } else {
+          setError('Network error. Please check your connection and try again.');
+          setExportProgress(null);
+        }
       } else {
-        setError(`Failed to export report: ${err.message || err}`);
+        setError(`Export failed: ${err.message || 'Unknown error occurred'}`);
+        setExportProgress(null);
       }
+    } finally {
+      // Always cleanup blob URL
+      if (url) {
+        window.URL.revokeObjectURL(url);
+      }
+      setIsExporting(false);
     }
   };
 

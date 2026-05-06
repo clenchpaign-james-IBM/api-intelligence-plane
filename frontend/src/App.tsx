@@ -40,7 +40,7 @@ const queryClient = new QueryClient({
  * - /metrics : Performance Metrics
  * - /predictions : Failure Predictions
  * - /security : Security Findings
- * - /query : Natural Language Query Interface
+ * - /query : API Query Interface
  */
 function App() {
   return (

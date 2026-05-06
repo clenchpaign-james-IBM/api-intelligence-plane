@@ -282,7 +282,7 @@ const Optimization = () => {
       <div>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Performance Optimization</h1>
+            <h1 className="text-3xl font-bold text-gray-900">API Performance Optimization</h1>
             <p className="mt-2 text-sm text-gray-600">
               API-centric performance recommendations for caching, compression, and rate limiting
             </p>

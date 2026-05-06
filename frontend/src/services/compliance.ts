@@ -343,30 +343,96 @@ export const exportAuditReport = async (
   format: 'pdf' | 'json' | 'html' = 'json'
 ): Promise<Blob> => {
   try {
-    const response = await apiClient.get(
-      `/api/v1/gateways/${gatewayId}/compliance/reports/audit/${reportId}/export`,
+    console.log('[exportAuditReport] Requesting:', { gatewayId, reportId, format });
+    
+    // Use raw axios to bypass any interceptor issues
+    const axios = (await import('axios')).default;
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '';
+    
+    const response = await axios.get(
+      `${baseURL}/api/v1/gateways/${gatewayId}/compliance/reports/audit/${reportId}/export`,
       {
         params: { format },
-        responseType: format === 'json' ? 'json' : 'blob',
+        responseType: format === 'html' ? 'text' : 'json',
+        headers: {
+          'Accept': format === 'html' ? 'text/html' : 'application/json',
+        },
       }
     );
     
-    // For JSON, convert to blob
+    console.log('[exportAuditReport] Raw axios response:', {
+      status: response.status,
+      statusText: response.statusText,
+      dataType: typeof response.data,
+      isObject: typeof response.data === 'object',
+      isString: typeof response.data === 'string',
+      isBlob: response.data instanceof Blob,
+      hasHeaders: !!response.headers,
+      contentType: response.headers ? response.headers['content-type'] : 'no headers',
+      dataKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : 'N/A',
+      dataLength: response.data ? (typeof response.data === 'string' ? response.data.length : JSON.stringify(response.data).length) : 0,
+      dataPreview: response.data ? (typeof response.data === 'string' ? response.data.substring(0, 200) : JSON.stringify(response.data).substring(0, 200)) : 'no data',
+    });
+    
+    // Validate response data
+    if (!response.data) {
+      console.error('[exportAuditReport] Response data is null or undefined');
+      throw new Error('Received empty response from server');
+    }
+    
+    // For JSON format, return as-is
     if (format === 'json') {
       const jsonStr = JSON.stringify(response.data, null, 2);
       return new Blob([jsonStr], { type: 'application/json' });
     }
     
-    // For HTML and PDF, response.data should already be a Blob
-    if (response.data instanceof Blob) {
-      return response.data;
+    // For HTML/PDF, backend returns it as a JSON response
+    // The actual HTML/PDF content should be in response.data directly as a string
+    // OR it might be wrapped in an object
+    let content: string;
+    
+    if (typeof response.data === 'string') {
+      // Direct string response
+      content = response.data;
+    } else if (typeof response.data === 'object') {
+      // Backend might wrap it in an object - try common keys
+      if ('content' in response.data) {
+        content = response.data.content;
+      } else if ('html' in response.data) {
+        content = response.data.html;
+      } else if ('data' in response.data) {
+        content = response.data.data;
+      } else {
+        // Last resort: stringify the whole object
+        console.warn('[exportAuditReport] Unexpected object structure, stringifying:', response.data);
+        content = JSON.stringify(response.data, null, 2);
+      }
+    } else {
+      console.error('[exportAuditReport] Unexpected response type:', typeof response.data);
+      throw new Error(`Invalid response type: ${typeof response.data}`);
     }
     
-    // Fallback: if response is not a Blob, convert it
-    const contentType = format === 'html' ? 'text/html' : 'application/pdf';
-    return new Blob([response.data], { type: contentType });
+    if (!content || content.length === 0) {
+      console.error('[exportAuditReport] Empty content after extraction');
+      throw new Error('Received empty report content from server');
+    }
+    
+    // Convert HTML/PDF content to Blob
+    const contentType = format === 'html' ? 'text/html; charset=utf-8' : 'application/pdf';
+    console.log('[exportAuditReport] Creating blob:', {
+      contentLength: content.length,
+      contentType,
+      contentPreview: content.substring(0, 100),
+    });
+    
+    return new Blob([content], { type: contentType });
   } catch (error: any) {
-    console.error('Failed to export audit report:', error);
+    console.error('[exportAuditReport] Failed to export audit report:', error);
+    console.error('[exportAuditReport] Error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
     throw new Error(error.response?.data?.detail || error.message || 'Failed to export audit report');
   }
 };

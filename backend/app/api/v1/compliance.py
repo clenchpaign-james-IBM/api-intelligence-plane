@@ -26,6 +26,112 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["compliance"])
 
 
+# Helper functions for HTML report generation
+def _validate_report_data_for_html(report: dict) -> dict:
+    """Validate and normalize report data for HTML export.
+    
+    Args:
+        report: Raw report data from compliance service
+        
+    Returns:
+        Validated and normalized report data with proper defaults
+    """
+    from uuid import uuid4
+    
+    return {
+        'report_id': str(report.get('report_id', uuid4())),
+        'generated_at': report.get('generated_at', datetime.utcnow().isoformat()),
+        'report_period': report.get('report_period', {
+            'start': (datetime.utcnow() - timedelta(days=90)).isoformat(),
+            'end': datetime.utcnow().isoformat()
+        }),
+        'executive_summary': report.get('executive_summary', 'Executive summary not available'),
+        'compliance_posture': report.get('compliance_posture', {
+            'total_violations': 0,
+            'open_violations': 0,
+            'remediated_violations': 0,
+            'remediation_rate': 0.0
+        }),
+        'violations_by_severity': report.get('violations_by_severity', {
+            'critical': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0
+        }),
+        'violations_by_standard': report.get('violations_by_standard', {}),
+        'recommendations': report.get('recommendations', [])
+    }
+
+
+def _build_standards_table_rows(violations_by_standard: dict) -> str:
+    """Build HTML table rows for violations by standard.
+    
+    Args:
+        violations_by_standard: Dictionary of standard violations
+        
+    Returns:
+        HTML table rows as string
+    """
+    if not violations_by_standard:
+        return '<tr><td colspan="2" class="no-data">No violations by standard</td></tr>'
+    
+    rows = []
+    for std, count in sorted(violations_by_standard.items(), key=lambda x: x[1], reverse=True):
+        rows.append(f'<tr><td>{std.upper()}</td><td><strong>{count}</strong></td></tr>')
+    
+    return '\n'.join(rows)
+
+
+def _build_recommendations_list(recommendations: list) -> str:
+    """Build HTML list items for recommendations.
+    
+    Args:
+        recommendations: List of recommendation strings
+        
+    Returns:
+        HTML list items as string
+    """
+    if not recommendations:
+        return '<li class="no-data">No recommendations available</li>'
+    
+    items = []
+    for rec in recommendations:
+        # Escape HTML special characters
+        escaped_rec = rec.replace('&', '&').replace('<', '<').replace('>', '>')
+        items.append(f'<li>{escaped_rec}</li>')
+    
+    return '\n'.join(items)
+
+
+def _build_severity_table_rows(violations_by_severity: dict) -> str:
+    """Build HTML table rows for violations by severity.
+    
+    Args:
+        violations_by_severity: Dictionary of severity violations
+        
+    Returns:
+        HTML table rows as string
+    """
+    severities = [
+        ('critical', 'Critical'),
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low')
+    ]
+    
+    rows = []
+    for severity_key, severity_label in severities:
+        count = violations_by_severity.get(severity_key, 0)
+        rows.append(
+            f'<tr class="{severity_key}">'
+            f'<td>{severity_label}</td>'
+            f'<td><strong>{count}</strong></td>'
+            f'</tr>'
+        )
+    
+    return '\n'.join(rows)
+
+
 # Request/Response Models
 class ComplianceScanRequest(BaseModel):
     """Request model for compliance scan."""
@@ -509,151 +615,374 @@ async def export_gateway_audit_report(
         )
         
         if format == "html":
-            # Generate HTML report BEFORE converting to JSON-serializable
-            # (so we can access the original data structure)
+            # Generate HTML report with proper validation and error handling
             try:
-                # Debug: Log full report
-                logger.info(f"=== FULL REPORT ===")
-                logger.info(f"Report type: {type(report)}")
-                logger.info(f"Report keys: {list(report.keys())}")
-                for key, value in report.items():
-                    logger.info(f"  {key}: {type(value)} = {value if not isinstance(value, (list, dict)) else f'<{type(value).__name__} with {len(value)} items>'}")
+                # Validate and normalize report data
+                validated_report = _validate_report_data_for_html(report)
                 
-                # Extract values with proper defaults and explicit logging
-                compliance_posture = report.get('compliance_posture', {})
-                logger.info(f"compliance_posture type: {type(compliance_posture)}, value: {compliance_posture}")
-                
-                violations_by_severity = report.get('violations_by_severity', {})
-                logger.info(f"violations_by_severity: {violations_by_severity}")
-                
-                violations_by_standard = report.get('violations_by_standard', {})
-                logger.info(f"violations_by_standard: {violations_by_standard}")
-                
-                report_period = report.get('report_period', {})
-                logger.info(f"report_period: {report_period}")
-                
-                report_id_str = str(report.get('report_id', 'N/A'))
-                logger.info(f"report_id_str: {report_id_str}")
-                
-                generated_at_str = str(report.get('generated_at', 'N/A'))
-                logger.info(f"generated_at_str: {generated_at_str}")
-                
-                executive_summary = report.get('executive_summary', 'No summary available')
-                logger.info(f"executive_summary: {executive_summary}")
+                # Extract validated values
+                report_id_str = validated_report['report_id']
+                generated_at_str = validated_report['generated_at']
+                report_period = validated_report['report_period']
+                executive_summary = validated_report['executive_summary']
+                compliance_posture = validated_report['compliance_posture']
+                violations_by_severity = validated_report['violations_by_severity']
+                violations_by_standard = validated_report['violations_by_standard']
+                recommendations = validated_report['recommendations']
                 
                 # Build standards table rows
-                standards_rows = ""
-                if violations_by_standard:
-                    for std, count in violations_by_standard.items():
-                        standards_rows += f"<tr><td>{std.upper()}</td><td>{count}</td></tr>"
-                else:
-                    standards_rows = "<tr><td colspan='2'>No violations by standard</td></tr>"
+                standards_rows = _build_standards_table_rows(violations_by_standard)
                 
                 # Build recommendations list
-                recommendations_items = ""
-                recommendations = report.get('recommendations', [])
-                if recommendations:
-                    for rec in recommendations:
-                        recommendations_items += f"<li>{rec}</li>"
-                else:
-                    recommendations_items = "<li>No recommendations available</li>"
+                recommendations_items = _build_recommendations_list(recommendations)
                 
+                # Build severity rows with proper formatting
+                severity_rows = _build_severity_table_rows(violations_by_severity)
+                
+                # Generate HTML with proper structure
                 html_content = f"""<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compliance Audit Report - {report_id_str}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; }}
-        h1 {{ color: #333; }}
-        h2 {{ color: #666; margin-top: 30px; }}
-        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-        th {{ background-color: #f2f2f2; }}
-        .critical {{ color: #dc2626; font-weight: bold; }}
-        .high {{ color: #ea580c; font-weight: bold; }}
-        .medium {{ color: #ca8a04; font-weight: bold; }}
-        .low {{ color: #2563eb; font-weight: bold; }}
-        .summary {{ background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        
+        /* Light mode (default) */
+        :root {{
+            --bg-primary: #f5f5f5;
+            --bg-secondary: white;
+            --bg-tertiary: #f8fafc;
+            --bg-accent: #eff6ff;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a5568;
+            --text-muted: #6b7280;
+            --border-color: #e2e8f0;
+            --accent-color: #2563eb;
+            --shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        
+        /* Dark mode */
+        @media (prefers-color-scheme: dark) {{
+            :root {{
+                --bg-primary: #1a1a1a;
+                --bg-secondary: #2d2d2d;
+                --bg-tertiary: #3a3a3a;
+                --bg-accent: #1e3a5f;
+                --text-primary: #f5f5f5;
+                --text-secondary: #d1d5db;
+                --text-muted: #9ca3af;
+                --border-color: #4a4a4a;
+                --accent-color: #3b82f6;
+                --shadow: 0 2px 4px rgba(0,0,0,0.3);
+            }}
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-primary);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: var(--bg-primary);
+        }}
+        
+        .container {{
+            background-color: var(--bg-secondary);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+        }}
+        
+        h1 {{
+            color: var(--text-primary);
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            border-bottom: 3px solid var(--accent-color);
+            padding-bottom: 10px;
+        }}
+        
+        h2 {{
+            color: var(--text-secondary);
+            font-size: 1.8em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 8px;
+        }}
+        
+        .metadata {{
+            background-color: var(--bg-tertiary);
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--accent-color);
+        }}
+        
+        .metadata p {{
+            margin: 8px 0;
+            font-size: 0.95em;
+        }}
+        
+        .metadata strong {{
+            color: var(--text-primary);
+            min-width: 120px;
+            display: inline-block;
+        }}
+        
+        .summary {{
+            background-color: var(--bg-accent);
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            border-left: 4px solid var(--accent-color);
+        }}
+        
+        .summary p {{
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }}
+        
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background-color: var(--bg-secondary);
+            box-shadow: var(--shadow);
+            overflow-x: auto;
+            display: block;
+        }}
+        
+        thead, tbody, tr {{
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+        }}
+        
+        th, td {{
+            border: 1px solid var(--border-color);
+            padding: 14px 16px;
+            text-align: left;
+        }}
+        
+        th {{
+            background-color: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }}
+        
+        tr:hover {{
+            background-color: var(--bg-tertiary);
+        }}
+        
+        .critical {{ color: #dc2626; font-weight: 600; }}
+        .high {{ color: #ea580c; font-weight: 600; }}
+        .medium {{ color: #ca8a04; font-weight: 600; }}
+        .low {{ color: #2563eb; font-weight: 600; }}
+        
+        ol {{
+            margin: 20px 0;
+            padding-left: 30px;
+        }}
+        
+        ol li {{
+            margin: 12px 0;
+            line-height: 1.6;
+        }}
+        
+        .no-data {{
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+        }}
+        
+        /* Responsive design */
+        @media (max-width: 768px) {{
+            body {{
+                padding: 20px 10px;
+            }}
+            .container {{
+                padding: 20px;
+            }}
+            h1 {{
+                font-size: 1.8em;
+            }}
+            h2 {{
+                font-size: 1.4em;
+            }}
+            th, td {{
+                padding: 10px 8px;
+                font-size: 0.9em;
+            }}
+            .metadata strong {{
+                display: block;
+                margin-bottom: 4px;
+            }}
+        }}
+        
+        @media (max-width: 480px) {{
+            h1 {{
+                font-size: 1.5em;
+            }}
+            h2 {{
+                font-size: 1.2em;
+            }}
+            th, td {{
+                padding: 8px 6px;
+                font-size: 0.85em;
+            }}
+        }}
+        
+        /* Print styles */
+        @media print {{
+            body {{
+                background-color: white;
+                padding: 0;
+            }}
+            .container {{
+                box-shadow: none;
+                padding: 20px;
+            }}
+            h1 {{
+                page-break-after: avoid;
+                color: #000;
+            }}
+            h2 {{
+                page-break-after: avoid;
+                color: #333;
+            }}
+            table {{
+                page-break-inside: avoid;
+            }}
+            tr {{
+                page-break-inside: avoid;
+            }}
+            .metadata, .summary {{
+                border-left-color: #000;
+            }}
+        }}
+        
+        /* Accessibility improvements */
+        *:focus {{
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }}
+        
+        a {{
+            color: var(--accent-color);
+            text-decoration: underline;
+        }}
+        
+        a:hover {{
+            text-decoration: none;
+        }}
     </style>
 </head>
 <body>
-    <h1>Compliance Audit Report</h1>
-    <p><strong>Report ID:</strong> {report_id_str}</p>
-    <p><strong>Generated:</strong> {generated_at_str}</p>
-    <p><strong>Period:</strong> {report_period.get('start', 'N/A')} to {report_period.get('end', 'N/A')}</p>
-    
-    <div class="summary">
-        <h2>Executive Summary</h2>
-        <p>{executive_summary}</p>
-    </div>
-    
-    <h2>Compliance Summary</h2>
-    <table>
-        <tr>
-            <th>Metric</th>
-            <th>Value</th>
-        </tr>
-        <tr>
-            <td>Total Violations</td>
-            <td>{compliance_posture.get('total_violations', 0)}</td>
-        </tr>
-        <tr>
-            <td>Open Violations</td>
-            <td>{compliance_posture.get('open_violations', 0)}</td>
-        </tr>
-        <tr>
-            <td>Remediated Violations</td>
-            <td>{compliance_posture.get('remediated_violations', 0)}</td>
-        </tr>
-        <tr>
-            <td>Remediation Rate</td>
-            <td>{compliance_posture.get('remediation_rate', 0)}%</td>
-        </tr>
-    </table>
-    
-    <h2>Violations by Severity</h2>
-    <table>
-        <tr>
-            <th>Severity</th>
-            <th>Count</th>
-        </tr>
-        <tr class="critical">
-            <td>Critical</td>
-            <td>{violations_by_severity.get('critical', 0)}</td>
-        </tr>
-        <tr class="high">
-            <td>High</td>
-            <td>{violations_by_severity.get('high', 0)}</td>
-        </tr>
-        <tr class="medium">
-            <td>Medium</td>
-            <td>{violations_by_severity.get('medium', 0)}</td>
-        </tr>
-        <tr class="low">
-            <td>Low</td>
-            <td>{violations_by_severity.get('low', 0)}</td>
-        </tr>
-    </table>
-    
-    <h2>Violations by Standard</h2>
-    <table>
-        <tr>
-            <th>Standard</th>
-            <th>Count</th>
-        </tr>
-        {standards_rows}
-    </table>
-    
-    <h2>Recommendations</h2>
-    <ol>
-        {recommendations_items}
-    </ol>
+    <main class="container" role="main" aria-label="Compliance Audit Report">
+        <header>
+            <h1 id="report-title">Compliance Audit Report</h1>
+        </header>
+        
+        <section class="metadata" aria-labelledby="metadata-heading">
+            <h2 id="metadata-heading" style="position: absolute; left: -10000px;">Report Metadata</h2>
+            <p><strong>Report ID:</strong> <span aria-label="Report identifier">{report_id_str}</span></p>
+            <p><strong>Generated:</strong> <time datetime="{generated_at_str}">{generated_at_str}</time></p>
+            <p><strong>Report Period:</strong> <time datetime="{report_period.get('start', 'N/A')}">{report_period.get('start', 'N/A')}</time> to <time datetime="{report_period.get('end', 'N/A')}">{report_period.get('end', 'N/A')}</time></p>
+            <p><strong>Gateway ID:</strong> <span aria-label="Gateway identifier">{gateway_id}</span></p>
+        </section>
+        
+        <section class="summary" aria-labelledby="summary-heading">
+            <h2 id="summary-heading">Executive Summary</h2>
+            <p>{executive_summary}</p>
+        </section>
+        
+        <section aria-labelledby="posture-heading">
+            <h2 id="posture-heading">Compliance Posture</h2>
+            <table role="table" aria-label="Compliance posture metrics">
+                <thead>
+                    <tr>
+                        <th scope="col">Metric</th>
+                        <th scope="col">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th scope="row">Total Violations</th>
+                        <td><strong>{compliance_posture.get('total_violations', 0)}</strong></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Open Violations</th>
+                        <td><strong>{compliance_posture.get('open_violations', 0)}</strong></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Remediated Violations</th>
+                        <td><strong>{compliance_posture.get('remediated_violations', 0)}</strong></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Remediation Rate</th>
+                        <td><strong>{compliance_posture.get('remediation_rate', 0):.1f}%</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+        
+        <section aria-labelledby="severity-heading">
+            <h2 id="severity-heading">Violations by Severity</h2>
+            <table role="table" aria-label="Violations grouped by severity level">
+                <thead>
+                    <tr>
+                        <th scope="col">Severity</th>
+                        <th scope="col">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {severity_rows}
+                </tbody>
+            </table>
+        </section>
+        
+        <section aria-labelledby="standard-heading">
+            <h2 id="standard-heading">Violations by Standard</h2>
+            <table role="table" aria-label="Violations grouped by compliance standard">
+                <thead>
+                    <tr>
+                        <th scope="col">Standard</th>
+                        <th scope="col">Count</th>
+                </tr>
+            </thead>
+            <tbody>
+                {standards_rows}
+            </tbody>
+        </table>
+        
+        </section>
+        
+        <section aria-labelledby="recommendations-heading">
+            <h2 id="recommendations-heading">Recommendations</h2>
+            <ol aria-label="Compliance recommendations">
+                {recommendations_items}
+            </ol>
+        </section>
+    </main>
 </body>
 </html>"""
+                
+                logger.info(f"HTML report generated successfully for gateway {gateway_id}")
                 return HTMLResponse(content=html_content)
+                
             except Exception as html_error:
-                logger.error(f"Failed to generate HTML: {str(html_error)}")
-                raise
+                logger.error(f"Failed to generate HTML report: {str(html_error)}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to generate HTML report: {str(html_error)}",
+                )
         
         # Convert UUIDs and datetimes to strings for JSON serialization
         from datetime import datetime

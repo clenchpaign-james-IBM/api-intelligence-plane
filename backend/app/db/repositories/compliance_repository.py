@@ -259,6 +259,62 @@ class ComplianceRepository(BaseRepository[ComplianceViolation]):
             self.model_class(**hit["_source"]) for hit in response["hits"]["hits"]
         ]
 
+    async def find_by_gateway_and_date_range(
+        self,
+        gateway_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        limit: int = 1000,
+    ) -> list[ComplianceViolation]:
+        """Find violations by gateway and date range.
+
+        Args:
+            gateway_id: Gateway identifier
+            start_date: Start of date range (inclusive)
+            end_date: End of date range (inclusive)
+            limit: Maximum results to return
+
+        Returns:
+            List of compliance violations
+        """
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"gateway_id": str(gateway_id)}},
+                    {
+                        "range": {
+                            "detected_at": {
+                                "gte": start_date.isoformat(),
+                                "lte": end_date.isoformat(),
+                            }
+                        }
+                    },
+                ]
+            }
+        }
+
+        body = {
+            "query": query,
+            "sort": [{"detected_at": {"order": "desc"}}],
+            "size": limit,
+        }
+
+        response = self.client.search(index=self.index_name, body=body)
+        return [
+            self.model_class(**hit["_source"]) for hit in response["hits"]["hits"]
+        ]
+
+        body = {
+            "query": query,
+            "sort": [{"detected_at": {"order": "desc"}}],
+            "size": limit,
+        }
+
+        response = self.client.search(index=self.index_name, body=body)
+        return [
+            self.model_class(**hit["_source"]) for hit in response["hits"]["hits"]
+        ]
+
     async def find_open_violations(
         self,
         api_id: Optional[UUID] = None,

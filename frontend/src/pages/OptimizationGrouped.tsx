@@ -99,7 +99,7 @@ const OptimizationGrouped = () => {
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Performance Optimization</h1>
+            <h1 className="text-3xl font-bold text-gray-900">API Performance Optimization</h1>
             <p className="mt-2 text-sm text-gray-600">
               AI-powered performance recommendations grouped by API - caching, query optimization, resource allocation, and more
             </p>

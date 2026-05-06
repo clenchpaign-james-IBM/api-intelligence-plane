@@ -486,3 +486,123 @@ class ComplianceViolation(BaseModel):
 
 
 # Made with Bob
+
+
+# Audit Report Validation Schemas
+class AuditReportSummary(BaseModel):
+    """Summary statistics for audit report."""
+    
+    total_violations: int = Field(..., ge=0, description="Total violations")
+    open_violations: int = Field(..., ge=0, description="Open violations")
+    remediated_violations: int = Field(..., ge=0, description="Remediated violations")
+    remediation_rate: float = Field(..., ge=0.0, le=100.0, description="Remediation rate percentage")
+
+
+class AuditReportPeriod(BaseModel):
+    """Time period covered by audit report."""
+    
+    start: str = Field(..., description="Start date (ISO 8601)")
+    end: str = Field(..., description="End date (ISO 8601)")
+
+
+class AuditReportSchema(BaseModel):
+    """Pydantic schema for validating audit reports.
+    
+    Ensures all audit reports have consistent structure and valid data
+    before being returned to clients or exported.
+    """
+    
+    report_id: str = Field(..., description="Unique report identifier")
+    generated_at: str = Field(..., description="Report generation timestamp (ISO 8601)")
+    report_period: AuditReportPeriod = Field(..., description="Report time period")
+    executive_summary: str = Field(..., min_length=1, description="AI-generated executive summary")
+    
+    # Compliance posture (using summary structure)
+    compliance_posture: AuditReportSummary = Field(..., description="Overall compliance posture")
+    
+    # Violations by severity
+    violations_by_severity: dict[str, int] = Field(
+        default_factory=dict,
+        description="Violations grouped by severity (critical, high, medium, low)"
+    )
+    
+    # Violations by standard
+    violations_by_standard: dict[str, int] = Field(
+        default_factory=dict,
+        description="Violations grouped by compliance standard"
+    )
+    
+    # Remediation status breakdown
+    remediation_status: dict[str, int] = Field(
+        default_factory=dict,
+        description="Violations grouped by remediation status"
+    )
+    
+    # Violations needing audit attention
+    violations_needing_audit: list[dict] = Field(
+        default_factory=list,
+        description="Violations requiring audit attention"
+    )
+    
+    # Audit evidence
+    audit_evidence: list[dict] = Field(
+        default_factory=list,
+        description="Collected audit evidence"
+    )
+    
+    # Recommendations
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="Audit recommendations"
+    )
+    
+    # Detailed violations (optional for full reports)
+    detailed_violations: list[dict] = Field(
+        default_factory=list,
+        description="Detailed violation information"
+    )
+    
+    class Config:
+        """Pydantic config."""
+        json_schema_extra = {
+            "example": {
+                "report_id": "550e8400-e29b-41d4-a716-446655440000",
+                "generated_at": "2026-05-06T10:30:00Z",
+                "report_period": {
+                    "start": "2026-02-06T00:00:00Z",
+                    "end": "2026-05-06T23:59:59Z"
+                },
+                "executive_summary": "Overall compliance posture shows...",
+                "compliance_posture": {
+                    "total_violations": 45,
+                    "open_violations": 12,
+                    "remediated_violations": 33,
+                    "remediation_rate": 73.3
+                },
+                "violations_by_severity": {
+                    "critical": 3,
+                    "high": 9,
+                    "medium": 18,
+                    "low": 15
+                },
+                "violations_by_standard": {
+                    "gdpr": 15,
+                    "hipaa": 10,
+                    "soc2": 12,
+                    "pci_dss": 5,
+                    "iso_27001": 3
+                },
+                "remediation_status": {
+                    "open": 12,
+                    "in_progress": 8,
+                    "remediated": 25
+                },
+                "violations_needing_audit": [],
+                "audit_evidence": [],
+                "recommendations": [
+                    "Address critical violations within 30 days",
+                    "Implement automated compliance monitoring"
+                ],
+                "detailed_violations": []
+            }
+        }

@@ -408,7 +408,7 @@ export const Compliance: React.FC = () => {
       <div className="mb-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Compliance Monitoring Center</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">API Compliance Monitoring</h1>
             <p className="mt-2 text-sm text-gray-600">
               Monitor regulatory compliance across all APIs and track audit readiness
             </p>

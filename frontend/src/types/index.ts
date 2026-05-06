@@ -1020,7 +1020,7 @@ export interface ComplianceTrend {
   violations: number;
 }
 
-// Audit Report (matches backend AuditReportResponse)
+// Audit Report (matches backend AuditReportSchema)
 export interface AuditReport {
   report_id: string;
   generated_at: string;
@@ -1032,20 +1032,64 @@ export interface AuditReport {
   compliance_posture: {
     total_violations: number;
     open_violations: number;
-    remediated_violations?: number;
-    [key: string]: any;
+    remediated_violations: number;
+    remediation_rate: number;
   };
   violations_by_standard: Record<string, number>;
   violations_by_severity: Record<string, number>;
-  remediation_status: {
-    total_violations: number;
-    remediated_violations: number;
-    open_violations: number;
-    remediation_rate: number;
-  };
-  violations_needing_audit: any[];
-  audit_evidence: any[];
+  remediation_status: Record<string, number>;
+  violations_needing_audit: ComplianceViolation[];
+  audit_evidence: AuditEvidence[];
   recommendations: string[];
+  detailed_violations?: ComplianceViolation[];
+}
+
+// Audit Evidence
+export interface AuditEvidence {
+  type: string;
+  description: string;
+  source: string;
+  timestamp: string;
+  data?: Record<string, any>;
+}
+
+// Type guard for AuditReport validation
+export function isAuditReport(data: unknown): data is AuditReport {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  
+  const report = data as Partial<AuditReport>;
+  
+  return (
+    typeof report.report_id === 'string' &&
+    typeof report.generated_at === 'string' &&
+    typeof report.executive_summary === 'string' &&
+    report.report_period !== undefined &&
+    typeof report.report_period === 'object' &&
+    typeof report.report_period.start === 'string' &&
+    typeof report.report_period.end === 'string' &&
+    report.compliance_posture !== undefined &&
+    typeof report.compliance_posture === 'object' &&
+    typeof report.compliance_posture.total_violations === 'number' &&
+    typeof report.compliance_posture.open_violations === 'number' &&
+    typeof report.compliance_posture.remediated_violations === 'number' &&
+    typeof report.compliance_posture.remediation_rate === 'number' &&
+    report.violations_by_severity !== undefined &&
+    typeof report.violations_by_severity === 'object' &&
+    report.violations_by_standard !== undefined &&
+    typeof report.violations_by_standard === 'object' &&
+    Array.isArray(report.recommendations)
+  );
+}
+
+// Validate and normalize audit report data
+export function validateAuditReport(data: unknown): AuditReport {
+  if (!isAuditReport(data)) {
+    throw new Error('Invalid audit report data structure');
+  }
+  
+  return data;
 }
 
 export interface AuditFinding {

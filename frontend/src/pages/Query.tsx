@@ -92,7 +92,7 @@ export const Query: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">
-              Natural Language Query
+              API Query
             </h1>
             <p className="text-sm text-gray-600 mt-2">
               Ask questions about your APIs in plain English

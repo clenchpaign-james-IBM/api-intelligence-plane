@@ -238,7 +238,7 @@ export const Security: React.FC = () => {
       <div className="mb-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">API Security Center</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">API Security</h1>
             <p className="mt-2 text-sm text-gray-600">
               Monitor security vulnerabilities across all APIs and track automated remediation
             </p>

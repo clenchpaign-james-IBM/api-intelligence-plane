@@ -1,6 +1,6 @@
 /**
- * Query Service - Natural Language Query API Client
- * 
+ * Query Service - API Query API Client
+ *
  * Handles communication with the agentic query API endpoint,
  * including session management for multi-turn conversations.
  * 

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compliance Audit Report - {report_id}</title>
+    <style>
+        /* Base Styles */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-tertiary: #f8fafc;
+            --bg-accent: #eff6ff;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a5568;
+            --text-muted: #6b7280;
+            --border-color: #e2e8f0;
+            --accent-color: #2563eb;
+            --accent-light: #3b82f6;
+            --shadow: rgba(0,0,0,0.1);
+            --critical: #dc2626;
+            --high: #ea580c;
+            --medium: #ca8a04;
+            --low: #2563eb;
+        }
+        
+        /* Dark Mode */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #1a1a1a;
+                --bg-secondary: #0f0f0f;
+                --bg-tertiary: #2d2d2d;
+                --bg-accent: #1e3a5f;
+                --text-primary: #f5f5f5;
+                --text-secondary: #d1d5db;
+                --text-muted: #9ca3af;
+                --border-color: #374151;
+                --accent-color: #3b82f6;
+                --accent-light: #60a5fa;
+                --shadow: rgba(0,0,0,0.3);
+                --critical: #f87171;
+                --high: #fb923c;
+                --medium: #fbbf24;
+                --low: #60a5fa;
+            }
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-primary);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: var(--bg-secondary);
+        }
+        
+        .container {
+            background-color: var(--bg-primary);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px var(--shadow);
+        }
+        
+        h1 {
+            color: var(--text-primary);
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            border-bottom: 3px solid var(--accent-color);
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: var(--text-secondary);
+            font-size: 1.8em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 8px;
+        }
+        
+        .metadata {
+            background-color: var(--bg-tertiary);
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--accent-color);
+        }
+        
+        .metadata p {
+            margin: 8px 0;
+            font-size: 0.95em;
+        }
+        
+        .metadata strong {
+            color: var(--text-primary);
+            min-width: 120px;
+            display: inline-block;
+        }
+        
+        .summary {
+            background-color: var(--bg-accent);
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            border-left: 4px solid var(--accent-light);
+        }
+        
+        .summary p {
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background-color: var(--bg-primary);
+            box-shadow: 0 1px 3px var(--shadow);
+            overflow-x: auto;
+            display: block;
+        }
+        
+        thead, tbody, tr {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+        }
+        
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 14px 16px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+        
+        tr:hover {
+            background-color: var(--bg-tertiary);
+        }
+        
+        .critical { color: var(--critical); font-weight: 600; }
+        .high { color: var(--high); font-weight: 600; }
+        .medium { color: var(--medium); font-weight: 600; }
+        .low { color: var(--low); font-weight: 600; }
+        
+        ol {
+            margin: 20px 0;
+            padding-left: 30px;
+        }
+        
+        ol li {
+            margin: 12px 0;
+            line-height: 1.6;
+        }
+        
+        .no-data {
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        /* Accessibility Improvements */
+        a {
+            color: var(--accent-light);
+            text-decoration: underline;
+        }
+        
+        a:hover, a:focus {
+            color: var(--accent-color);
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }
+        
+        button, a, input, select, textarea {
+            font-size: inherit;
+        }
+        
+        /* Focus visible for keyboard navigation */
+        *:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            body {
+                padding: 20px 10px;
+            }
+            
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            h2 {
+                font-size: 1.5em;
+                margin-top: 30px;
+            }
+            
+            table {
+                font-size: 0.9em;
+            }
+            
+            th, td {
+                padding: 10px 8px;
+            }
+            
+            .metadata strong {
+                min-width: 100px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 1.75em;
+            }
+            
+            h2 {
+                font-size: 1.3em;
+            }
+            
+            table {
+                font-size: 0.85em;
+            }
+            
+            th, td {
+                padding: 8px 6px;
+            }
+            
+            .metadata strong {
+                display: block;
+                margin-bottom: 4px;
+            }
+        }
+        
+        /* Enhanced Print Styles */
+        @media print {
+            @page {
+                margin: 2cm;
+                size: A4;
+            }
+            
+            body {
+                background-color: white;
+                color: black;
+                padding: 0;
+                max-width: 100%;
+            }
+            
+            .container {
+                box-shadow: none;
+                padding: 0;
+            }
+            
+            h1 {
+                page-break-after: avoid;
+                color: black;
+                border-bottom-color: black;
+            }
+            
+            h2 {
+                page-break-after: avoid;
+                page-break-before: auto;
+                color: black;
+                border-bottom-color: #ccc;
+            }
+            
+            table {
+                page-break-inside: avoid;
+                box-shadow: none;
+            }
+            
+            tr {
+                page-break-inside: avoid;
+                page-break-after: auto;
+            }
+            
+            thead {
+                display: table-header-group;
+            }
+            
+            .metadata, .summary {
+                page-break-inside: avoid;
+                border-left-color: black;
+            }
+            
+            .critical { color: #dc2626; }
+            .high { color: #ea580c; }
+            .medium { color: #ca8a04; }
+            .low { color: #2563eb; }
+            
+            /* Hide interactive elements in print */
+            button, a[href^="javascript:"] {
+                display: none;
+            }
+            
+            /* Show URLs for links */
+            a[href]:after {
+                content: " (" attr(href) ")";
+                font-size: 0.8em;
+                color: #666;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Compliance Audit Report</h1>
+        
+        <div class="metadata" role="region" aria-label="Report Metadata">
+            <p><strong>Report ID:</strong> {report_id}</p>
+            <p><strong>Generated:</strong> <time datetime="{generated_at}">{generated_at_display}</time></p>
+            <p><strong>Report Period:</strong> <time datetime="{period_start}">{period_start_display}</time> to <time datetime="{period_end}">{period_end_display}</time></p>
+            <p><strong>Gateway ID:</strong> {gateway_id}</p>
+        </div>
+        
+        <div class="summary" role="region" aria-label="Executive Summary">
+            <h2>Executive Summary</h2>
+            <p>{executive_summary}</p>
+        </div>
+        
+        <section aria-labelledby="compliance-posture-heading">
+            <h2 id="compliance-posture-heading">Compliance Posture</h2>
+            <table role="table" aria-label="Compliance Posture Metrics">
+                <thead>
+                    <tr>
+                        <th scope="col">Metric</th>
+                        <th scope="col">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total Violations</td>
+                        <td><strong>{total_violations}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Open Violations</td>
+                        <td><strong>{open_violations}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Remediated Violations</td>
+                        <td><strong>{remediated_violations}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Remediation Rate</td>
+                        <td><strong>{remediation_rate}%</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+        
+        <section aria-labelledby="severity-heading">
+            <h2 id="severity-heading">Violations by Severity</h2>
+            <table role="table" aria-label="Violations by Severity">
+                <thead>
+                    <tr>
+                        <th scope="col">Severity</th>
+                        <th scope="col">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {severity_rows}
+                </tbody>
+            </table>
+        </section>
+        
+        <section aria-labelledby="standards-heading">
+            <h2 id="standards-heading">Violations by Standard</h2>
+            <table role="table" aria-label="Violations by Compliance Standard">
+                <thead>
+                    <tr>
+                        <th scope="col">Standard</th>
+                        <th scope="col">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {standards_rows}
+                </tbody>
+            </table>
+        </section>
+        
+        <section aria-labelledby="recommendations-heading">
+            <h2 id="recommendations-heading">Recommendations</h2>
+            <ol aria-label="Compliance Recommendations">
+                {recommendations_items}
+            </ol>
+        </section>
+    </div>
+</body>
+</html>
