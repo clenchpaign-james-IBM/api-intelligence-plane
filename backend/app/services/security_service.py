@@ -265,6 +265,7 @@ class SecurityService:
         self,
         vulnerability_id: UUID,
         remediation_strategy: Optional[str] = None,
+        override_request: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Trigger automated remediation for a vulnerability.
         
@@ -274,6 +275,9 @@ class SecurityService:
         Args:
             vulnerability_id: Vulnerability to remediate
             remediation_strategy: Optional specific strategy to use
+            override_request: Optional override configuration with:
+                - override_config: Dict of field overrides
+                - manual_analysis: Dict with reason, risk_acknowledgement, reviewed_by
 
         Returns:
             Remediation result
@@ -332,6 +336,7 @@ class SecurityService:
                 api=api,
                 vulnerability=vulnerability,
                 strategy=remediation_strategy,
+                override_request=override_request,
             )
 
             # Check if remediation was successful
@@ -358,6 +363,22 @@ class SecurityService:
             # Update plan status if plan was used
             if vulnerability.recommended_remediation and vulnerability.plan_status == "generated":
                 vulnerability.plan_status = "approved"  # Mark as approved when remediation starts
+            
+            # Add override metadata if overrides were applied
+            if override_request:
+                override_config = override_request.get("override_config", {})
+                manual_analysis = override_request.get("manual_analysis", {})
+                
+                # Store override metadata in vulnerability metadata
+                if not vulnerability.metadata:
+                    vulnerability.metadata = {}
+                
+                vulnerability.metadata["override_metadata"] = {
+                    "override_applied": True,
+                    "overridden_fields": list(override_config.keys()),
+                    "manual_analysis": manual_analysis,
+                    "applied_at": datetime.utcnow().isoformat(),
+                }
 
             self.vulnerability_repository.update(
                 str(vulnerability.id),
@@ -633,8 +654,16 @@ class SecurityService:
         api: API,
         vulnerability: Vulnerability,
         strategy: Optional[str] = None,
+        override_request: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Apply automated remediation for a vulnerability via Gateway adapter."""
+        """Apply automated remediation for a vulnerability via Gateway adapter.
+        
+        Args:
+            api: API to remediate
+            vulnerability: Vulnerability to fix
+            strategy: Optional remediation strategy
+            override_request: Optional override configuration with override_config and manual_analysis
+        """
         actions = []
         
         # Get gateway adapter for this API
@@ -652,24 +681,36 @@ class SecurityService:
         try:
             # Apply remediation based on vulnerability type
             if vulnerability.vulnerability_type == VulnerabilityType.AUTHENTICATION:
+                # Get default authentication config
+                default_config = AuthenticationConfig(
+                    auth_type="oauth2",
+                    oauth_provider="default",
+                    oauth_scopes=["read", "write"],
+                    oauth_token_endpoint=None,
+                    jwt_issuer=None,
+                    jwt_audience=None,
+                    jwt_public_key_url=None,
+                    api_key_header=None,
+                    api_key_query_param=None,
+                    allow_anonymous=False,
+                    cache_credentials=True,
+                    cache_ttl_seconds=300,
+                )
+                
+                # Apply overrides if provided
+                if override_request:
+                    override_config = override_request.get("override_config", {})
+                    final_config_dict = default_config.dict()
+                    final_config_dict.update(override_config)
+                    final_config = AuthenticationConfig(**final_config_dict)
+                else:
+                    final_config = default_config
+                
                 policy = PolicyAction(
                     action_type=PolicyActionType.AUTHENTICATION,
                     enabled=True,
                     stage="request",
-                    config=AuthenticationConfig(
-                        auth_type="oauth2",
-                        oauth_provider="default",
-                        oauth_scopes=["read", "write"],
-                        oauth_token_endpoint=None,
-                        jwt_issuer=None,
-                        jwt_audience=None,
-                        jwt_public_key_url=None,
-                        api_key_header=None,
-                        api_key_query_param=None,
-                        allow_anonymous=False,
-                        cache_credentials=True,
-                        cache_ttl_seconds=300,
-                    ),
+                    config=final_config,
                     vendor_config={},
                     name=f"Authentication Policy for {api.name}",
                     description=f"Security remediation for vulnerability {vulnerability.id}",
@@ -737,23 +778,35 @@ class SecurityService:
                 
             elif vulnerability.vulnerability_type == VulnerabilityType.CONFIGURATION:
                 if vulnerability.configuration_type == ConfigurationType.RATE_LIMITING:
+                    # Get default rate limiting config
+                    default_config = RateLimitConfig(
+                        requests_per_second=None,
+                        requests_per_minute=100,
+                        requests_per_hour=None,
+                        requests_per_day=None,
+                        concurrent_requests=None,
+                        burst_allowance=20,
+                        rate_limit_key="ip",
+                        custom_key_header=None,
+                        enforcement_action="reject",
+                        include_rate_limit_headers=True,
+                        consumer_tiers=None,
+                    )
+                    
+                    # Apply overrides if provided
+                    if override_request:
+                        override_config = override_request.get("override_config", {})
+                        final_config_dict = default_config.dict()
+                        final_config_dict.update(override_config)
+                        final_config = RateLimitConfig(**final_config_dict)
+                    else:
+                        final_config = default_config
+                    
                     policy = PolicyAction(
                         action_type=PolicyActionType.RATE_LIMITING,
                         enabled=True,
                         stage="request",
-                        config=RateLimitConfig(
-                            requests_per_second=None,
-                            requests_per_minute=100,
-                            requests_per_hour=None,
-                            requests_per_day=None,
-                            concurrent_requests=None,
-                            burst_allowance=20,
-                            rate_limit_key="ip",
-                            custom_key_header=None,
-                            enforcement_action="reject",
-                            include_rate_limit_headers=True,
-                            consumer_tiers=None,
-                        ),
+                        config=final_config,
                         vendor_config={},
                         name=f"Rate Limit Policy for {api.name}",
                         description=f"Security remediation for vulnerability {vulnerability.id}",
@@ -761,6 +814,7 @@ class SecurityService:
                     success = await self.gateway_adapter.apply_rate_limit_policy(
                         str(api.id), policy
                     )
+                    
                     actions.append(
                         RemediationAction(
                             action="Applied rate limiting policy (100 req/min)",
@@ -774,21 +828,33 @@ class SecurityService:
                     )
                     
                 elif vulnerability.configuration_type == ConfigurationType.TLS:
+                    # Get default TLS config
+                    default_config = TlsConfig(
+                        enforce_tls=True,
+                        min_tls_version="1.2",
+                        allowed_cipher_suites=[
+                            "TLS_AES_128_GCM_SHA256",
+                            "TLS_AES_256_GCM_SHA384",
+                        ],
+                        require_client_certificate=False,
+                        trusted_ca_certificates=None,
+                        verify_backend_certificate=True,
+                    )
+                    
+                    # Apply overrides if provided
+                    if override_request:
+                        override_config = override_request.get("override_config", {})
+                        final_config_dict = default_config.dict()
+                        final_config_dict.update(override_config)
+                        final_config = TlsConfig(**final_config_dict)
+                    else:
+                        final_config = default_config
+                    
                     policy = PolicyAction(
                         action_type=PolicyActionType.TLS,
                         enabled=True,
                         stage="request",
-                        config=TlsConfig(
-                            enforce_tls=True,
-                            min_tls_version="1.2",
-                            allowed_cipher_suites=[
-                                "TLS_AES_128_GCM_SHA256",
-                                "TLS_AES_256_GCM_SHA384",
-                            ],
-                            require_client_certificate=False,
-                            trusted_ca_certificates=None,
-                            verify_backend_certificate=True,
-                        ),
+                        config=final_config,
                         vendor_config={"hsts_enabled": True},
                         name=f"TLS Policy for {api.name}",
                         description=f"Security remediation for vulnerability {vulnerability.id}",
@@ -796,6 +862,7 @@ class SecurityService:
                     success = await self.gateway_adapter.apply_tls_policy(
                         str(api.id), policy
                     )
+                    
                     actions.append(
                         RemediationAction(
                             action="Enforced HTTPS-only with TLS 1.2+ at gateway",

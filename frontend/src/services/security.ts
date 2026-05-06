@@ -129,12 +129,42 @@ export function getStatusColor(status: string): string {
 }
 
 /**
- * Remediate a vulnerability
+ * Preview remediation policy for a vulnerability
+ */
+export async function previewRemediation(
+  gatewayId: string,
+  vulnerabilityId: string
+): Promise<any> {
+  const url = `${API_BASE_URL}/api/v1/gateways/${gatewayId}/security/vulnerabilities/${vulnerabilityId}/preview-remediation`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to preview remediation: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Remediate a vulnerability with optional overrides
  */
 export async function remediateVulnerability(
   gatewayId: string,
   vulnerabilityId: string,
-  strategy?: string
+  options?: {
+    strategy?: string;
+    override_config?: Record<string, any>;
+    manual_analysis?: {
+      reason?: string;
+      risk_acknowledgement?: string;
+      reviewed_by?: string;
+    };
+  }
 ): Promise<any> {
   const url = `${API_BASE_URL}/api/v1/gateways/${gatewayId}/security/vulnerabilities/${vulnerabilityId}/remediate`;
   const response = await fetch(url, {
@@ -143,8 +173,9 @@ export async function remediateVulnerability(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      vulnerability_id: vulnerabilityId,
-      remediation_strategy: strategy,
+      remediation_strategy: options?.strategy,
+      override_config: options?.override_config,
+      manual_analysis: options?.manual_analysis,
     }),
   });
 

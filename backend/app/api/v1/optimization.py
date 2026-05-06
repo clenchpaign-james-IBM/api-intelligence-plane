@@ -877,20 +877,25 @@ async def get_gateway_recommendation_insights(
 async def apply_gateway_recommendation(
     gateway_id: UUID,
     recommendation_id: UUID,
+    override_request: Optional[dict] = None,
 ) -> dict:
     """
-    Apply a recommendation's policy to the actual Gateway.
+    Apply a recommendation's policy to the actual Gateway with optional overrides.
 
     This endpoint:
     1. Retrieves the recommendation from the database
     2. Gets the API and Gateway information
-    3. Creates a Gateway adapter
-    4. Applies the appropriate policy (caching, compression, rate limiting) to the Gateway
-    5. Updates the recommendation status
+    3. Applies user overrides if provided (otherwise uses defaults)
+    4. Creates a Gateway adapter
+    5. Applies the appropriate policy (caching, compression, rate limiting) to the Gateway
+    6. Updates the recommendation status and persists override metadata
 
     Args:
         gateway_id: Gateway UUID (required)
         recommendation_id: Recommendation UUID to apply
+        override_request: Optional override configuration:
+            - override_config: dict (fields to override)
+            - manual_analysis: dict (reason, reviewed_by, etc.)
 
     Returns:
         Dictionary with application result:
@@ -901,6 +906,7 @@ async def apply_gateway_recommendation(
             - policy_type: str
             - message: str
             - applied_at: str (ISO format)
+            - override_metadata: dict (if overrides were applied)
 
     Raises:
         HTTPException: If gateway or recommendation not found or application fails
@@ -942,6 +948,142 @@ async def apply_gateway_recommendation(
                     detail=f"Recommendation {recommendation_id} not found in gateway {gateway_id}",
                 )
         
+        # Apply recommendation through service with optional overrides
+        result = await optimization_service.apply_recommendation_to_gateway(
+            str(recommendation_id),
+            override_request=override_request
+        )
+        
+        return result
+
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        logger.error(f"Gateway operation failed: {e}")
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to apply recommendation {recommendation_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to apply recommendation: {str(e)}",
+        )
+
+        
+
+@router.post(
+    "/gateways/{gateway_id}/optimization/recommendations/{recommendation_id}/preview",
+    summary="Preview optimization policy before applying",
+    response_model=dict,
+)
+async def preview_optimization_policy(
+    gateway_id: UUID,
+    recommendation_id: UUID,
+) -> dict:
+    """
+    Preview the default policy configuration that would be applied for an optimization recommendation.
+    
+    This endpoint generates a policy draft showing:
+    - Default configuration values
+    - Editable fields with metadata
+    - Warnings and constraints
+    
+    Use this before calling the apply endpoint to review and customize the policy.
+    
+    Args:
+        gateway_id: Gateway UUID
+        recommendation_id: Recommendation UUID to preview
+    
+    Returns:
+        Dictionary with policy draft:
+            - policy_type: str (e.g., "caching", "rate_limiting")
+            - action_type: str (PolicyActionType value)
+            - default_config: dict (default configuration values)
+            - editable_fields: list (fields that can be customized)
+            - manual_analysis_required: bool
+            - warnings: list (any warnings about the policy)
+    
+    Raises:
+        HTTPException: If gateway or recommendation not found
+    """
+    try:
+        # Verify gateway exists
+        from app.db.repositories.gateway_repository import GatewayRepository
+        gateway_repo = GatewayRepository()
+        gateway = gateway_repo.get(str(gateway_id))
+        
+        if not gateway:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {gateway_id} not found",
+            )
+        
+        # Get recommendation
+        recommendation_repo = RecommendationRepository()
+        recommendation = recommendation_repo.get_recommendation(str(recommendation_id))
+        
+        if not recommendation:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Recommendation {recommendation_id} not found",
+            )
+        
+        # Get API
+        api_repo = APIRepository()
+        api = api_repo.get(str(recommendation.api_id))
+        
+        if not api:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"API {recommendation.api_id} not found",
+            )
+        
+        # Verify recommendation belongs to gateway
+        if str(api.gateway_id) != str(gateway_id):
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Recommendation {recommendation_id} not found in gateway {gateway_id}",
+            )
+        
+        # Generate policy draft
+        from app.services.policy_draft_service import PolicyDraftService
+        draft_service = PolicyDraftService()
+        
+        draft = draft_service.generate_optimization_draft(recommendation, api)
+        
+        # Apply vendor-specific field restrictions
+        draft.editable_fields = draft_service.apply_vendor_restrictions(
+            draft.editable_fields,
+            gateway.vendor,
+            draft.policy_type
+        )
+        
+        # Add vendor info to response
+        draft_dict = draft.dict()
+        draft_dict["vendor_constraints"] = {
+            "vendor": gateway.vendor,
+            "vendor_name": gateway.name,
+        }
+        
+        return draft_dict
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to preview recommendation {recommendation_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview recommendation: {str(e)}",
+        )
+
         # Apply recommendation through service
         return await optimization_service.apply_recommendation_to_gateway(str(recommendation_id))
 

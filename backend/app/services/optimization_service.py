@@ -1044,12 +1044,16 @@ class OptimizationService:
     async def apply_recommendation_to_gateway(
         self,
         recommendation_id: str,
+        override_request: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Apply a recommendation's policy to the actual Gateway.
 
         Args:
             recommendation_id: Recommendation UUID to apply
+            override_request: Optional override configuration with:
+                - override_config: Dict of field overrides
+                - manual_analysis: Dict with reason, risk_acknowledgement, reviewed_by
 
         Returns:
             Dictionary with application result
@@ -1169,22 +1173,42 @@ class OptimizationService:
 
             # Apply policy based on recommendation type
             if policy_type == "caching":
+                # Generate default config
+                from app.services.policy_draft_service import PolicyDraftService
+                draft_service = PolicyDraftService()
+                
+                # Get default caching config
+                default_config = CachingConfig(
+                    ttl_seconds=300,
+                    max_ttl_seconds=None,
+                    cache_key_strategy="url_headers",
+                    vary_headers=["Accept", "Accept-Encoding"],
+                    vary_query_params=None,
+                    respect_cache_control_headers=True,
+                    cache_methods=["GET", "HEAD"],
+                    cache_status_codes=[200, 203, 204, 206, 300, 301],
+                    max_payload_size_bytes=None,
+                    invalidate_on_methods=["POST", "PUT", "PATCH", "DELETE"],
+                )
+                
+                # Apply overrides if provided
+                if override_request:
+                    override_config = override_request.get("override_config", {})
+                    manual_analysis = override_request.get("manual_analysis", {})
+                    
+                    # Merge overrides into default config
+                    final_config_dict = default_config.dict()
+                    final_config_dict.update(override_config)
+                    final_config = CachingConfig(**final_config_dict)
+                else:
+                    final_config = default_config
+                    manual_analysis = {}
+                
                 policy = PolicyAction(
                     action_type=PolicyActionType.CACHING,
                     enabled=True,
                     stage="response",
-                    config=CachingConfig(
-                        ttl_seconds=300,
-                        max_ttl_seconds=None,
-                        cache_key_strategy="url_headers",
-                        vary_headers=["Accept", "Accept-Encoding"],
-                        vary_query_params=None,
-                        respect_cache_control_headers=True,
-                        cache_methods=["GET", "HEAD"],
-                        cache_status_codes=[200, 203, 204, 206, 300, 301],
-                        max_payload_size_bytes=None,
-                        invalidate_on_methods=["POST", "PUT", "PATCH", "DELETE"],
-                    ),
+                    config=final_config,
                     vendor_config={},
                     name=f"Cache Policy for {api.name}",
                     description=f"Caching policy applied from recommendation {recommendation.id}",
@@ -1194,23 +1218,39 @@ class OptimizationService:
                 vendor_policy_id = result.get("policy_id") if isinstance(result, dict) else None
 
             elif policy_type == "rate_limiting":
+                # Get default rate limiting config
+                default_config = RateLimitConfig(
+                    requests_per_second=100,
+                    requests_per_minute=5000,
+                    requests_per_hour=250000,
+                    requests_per_day=None,
+                    concurrent_requests=50,
+                    burst_allowance=None,
+                    rate_limit_key="ip",
+                    custom_key_header=None,
+                    enforcement_action="throttle",
+                    include_rate_limit_headers=True,
+                    consumer_tiers=None,
+                )
+                
+                # Apply overrides if provided
+                if override_request:
+                    override_config = override_request.get("override_config", {})
+                    manual_analysis = override_request.get("manual_analysis", {})
+                    
+                    # Merge overrides into default config
+                    final_config_dict = default_config.dict()
+                    final_config_dict.update(override_config)
+                    final_config = RateLimitConfig(**final_config_dict)
+                else:
+                    final_config = default_config
+                    manual_analysis = {}
+                
                 policy = PolicyAction(
                     action_type=PolicyActionType.RATE_LIMITING,
                     enabled=True,
                     stage="request",
-                    config=RateLimitConfig(
-                        requests_per_second=100,
-                        requests_per_minute=5000,
-                        requests_per_hour=250000,
-                        requests_per_day=None,
-                        concurrent_requests=50,
-                        burst_allowance=None,
-                        rate_limit_key="ip",
-                        custom_key_header=None,
-                        enforcement_action="throttle",
-                        include_rate_limit_headers=True,
-                        consumer_tiers=None,
-                    ),
+                    config=final_config,
                     vendor_config={},
                     name=f"Rate Limit Policy for {api.name}",
                     description=f"Rate limiting policy applied from recommendation {recommendation.id}",
@@ -1256,6 +1296,29 @@ class OptimizationService:
             # Record successful action
             implemented_at = datetime.utcnow()
             
+            # Build action metadata with override info if present
+            action_metadata = {
+                "gateway_id": str(gateway.id),
+                "gateway_name": gateway.name,
+                "api_id": str(api.id),
+                "api_name": api.name,
+                "policy_type": policy_type,
+                "vendor": gateway.vendor
+            }
+            
+            # Add override metadata if overrides were applied
+            if override_request:
+                override_config = override_request.get("override_config", {})
+                manual_analysis_data = override_request.get("manual_analysis", {})
+                
+                action_metadata["override_applied"] = True
+                action_metadata["overridden_fields"] = list(override_config.keys())
+                action_metadata["default_config"] = default_config.dict()
+                action_metadata["applied_config"] = final_config.dict()
+                
+                if manual_analysis_data:
+                    action_metadata["manual_analysis"] = manual_analysis_data
+            
             success_action = OptimizationAction(
                 action=f"Applied {policy_type} policy to gateway",
                 type=OptimizationActionType.APPLY_POLICY,
@@ -1264,14 +1327,7 @@ class OptimizationService:
                 performed_by="system",
                 gateway_policy_id=vendor_policy_id,
                 error_message=None,
-                metadata={
-                    "gateway_id": str(gateway.id),
-                    "gateway_name": gateway.name,
-                    "api_id": str(api.id),
-                    "api_name": api.name,
-                    "policy_type": policy_type,
-                    "vendor": gateway.vendor
-                }
+                metadata=action_metadata
             )
             
             existing_actions = recommendation.remediation_actions or []
@@ -1285,6 +1341,14 @@ class OptimizationService:
             }
             if vendor_policy_id:
                 vendor_metadata["policy_id"] = vendor_policy_id
+            
+            # Add override metadata to vendor_metadata for audit trail
+            if override_request:
+                vendor_metadata["override_metadata"] = {
+                    "override_applied": True,
+                    "overridden_fields": list(override_request.get("override_config", {}).keys()),
+                    "manual_analysis": override_request.get("manual_analysis", {})
+                }
 
             self.recommendation_repo.update(
                 recommendation_id,

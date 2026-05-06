@@ -7,6 +7,7 @@ import Error from '../components/common/Error';
 import GatewaySelector from '../components/common/GatewaySelector';
 import { RecommendationCard } from '../components/optimization/RecommendationCard';
 import { RecommendationDetail } from '../components/optimization/RecommendationDetail';
+import { PolicyReviewModal } from '../components/PolicyReviewModal';
 import { api } from '../services/api';
 import type { OptimizationRecommendation } from '../types/optimization';
 import type {
@@ -39,6 +40,9 @@ const Optimization = () => {
   const [selectedStatus, setSelectedStatus] = useState<RecommendationStatus | 'all'>('all');
   const [selectedType, setSelectedType] = useState<RecommendationType | 'all'>('all');
   const [selectedRecommendation, setSelectedRecommendation] = useState<OptimizationRecommendation | null>(null);
+  const [showPolicyModal, setShowPolicyModal] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<any>(null);
+  const [currentRecommendationForReview, setCurrentRecommendationForReview] = useState<OptimizationRecommendation | null>(null);
   
   const queryClient = useQueryClient();
 
@@ -143,12 +147,32 @@ const Optimization = () => {
     }
   };
 
+  // Preview policy mutation
+  const previewMutation = useMutation({
+    mutationFn: ({ gatewayId, recommendationId }: { gatewayId: string; recommendationId: string }) =>
+      api.recommendations.previewPolicy(gatewayId, recommendationId),
+    onSuccess: (data: any, variables) => {
+      setPolicyDraft(data);
+      setShowPolicyModal(true);
+    },
+    onError: (error: any) => {
+      showError('Preview Failed', error.message || 'Failed to preview policy configuration');
+    },
+  });
+
   // Apply policy mutation (creates or updates policy in Gateway)
   const applyMutation = useMutation({
-    mutationFn: ({ gatewayId, recommendationId }: { gatewayId: string; recommendationId: string }) =>
-      api.recommendations.applyToGateway(gatewayId, recommendationId),
+    mutationFn: ({ gatewayId, recommendationId, overrideRequest }: {
+      gatewayId: string;
+      recommendationId: string;
+      overrideRequest?: any;
+    }) =>
+      api.recommendations.applyToGateway(gatewayId, recommendationId, overrideRequest),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+      setShowPolicyModal(false);
+      setPolicyDraft(null);
+      setCurrentRecommendationForReview(null);
       if (data.requires_manual_configuration) {
         showWarning(
           'Manual Configuration Required',
@@ -163,6 +187,27 @@ const Optimization = () => {
       showError('Apply Failed', error.message || 'Unknown error');
     },
   });
+
+  // Handle review and apply workflow
+  const handleReviewAndApply = async (gatewayId: string, recommendationId: string, recommendation: OptimizationRecommendation) => {
+    setCurrentRecommendationForReview(recommendation);
+    previewMutation.mutate({ gatewayId, recommendationId });
+  };
+
+  // Handle apply with overrides from modal
+  const handleApplyWithOverrides = async (overrideConfig: Record<string, any>, manualAnalysis: any) => {
+    if (!currentRecommendationForReview?.gateway_id) return;
+    
+    const overrideRequest = Object.keys(overrideConfig).length > 0 || Object.keys(manualAnalysis).length > 0
+      ? { override_config: overrideConfig, manual_analysis: manualAnalysis }
+      : undefined;
+
+    applyMutation.mutate({
+      gatewayId: currentRecommendationForReview.gateway_id,
+      recommendationId: currentRecommendationForReview.id,
+      overrideRequest
+    });
+  };
 
   // Remove policy mutation
   const removeMutation = useMutation({
@@ -397,14 +442,7 @@ const Optimization = () => {
               <RecommendationDetail
                 recommendation={selectedRecommendation}
                 onApply={(gatewayId, recommendationId) => {
-                  applyMutation.mutate(
-                    { gatewayId, recommendationId },
-                    {
-                      onSuccess: () => {
-                        setSelectedRecommendation(null);
-                      },
-                    }
-                  );
+                  handleReviewAndApply(gatewayId, recommendationId, selectedRecommendation);
                 }}
                 onRemove={(gatewayId, recommendationId) => {
                   showConfirm(
@@ -426,6 +464,20 @@ const Optimization = () => {
           </div>
         </div>
       )}
+
+      {/* Policy Review Modal */}
+      <PolicyReviewModal
+        isOpen={showPolicyModal}
+        onClose={() => {
+          setShowPolicyModal(false);
+          setPolicyDraft(null);
+        }}
+        onApply={handleApplyWithOverrides}
+        policyDraft={policyDraft}
+        title="Review Optimization Policy"
+        entityName={currentRecommendationForReview?.title || 'Recommendation'}
+        isLoading={previewMutation.isPending || applyMutation.isPending}
+      />
     </div>
   );
 };

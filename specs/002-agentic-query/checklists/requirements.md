@@ -72,11 +72,11 @@
 
 The specification is complete, well-structured, and ready for the planning phase. All quality criteria are met:
 
-- Clear user value proposition with prioritized user stories
-- Comprehensive functional requirements with testable acceptance criteria
-- Measurable success criteria focused on user outcomes
-- Well-defined scope with explicit boundaries
-- Identified dependencies and assumptions
+- Clear user value proposition with prioritized user stories, now including remediation policy review and manual override support
+- Comprehensive functional requirements with testable acceptance criteria for both agentic query behavior and remediation customization flows
+- Measurable success criteria focused on user outcomes, including review completion time, auditability, and override validation
+- Well-defined scope with explicit boundaries, including what remediation customization does not include
+- Identified dependencies and assumptions for query workflows and remediation audit handling
 - No implementation details or technical architecture
 
 The specification successfully transforms the user's request into a clear, actionable feature definition that can guide planning and implementation without prescribing technical solutions.
@@ -87,5 +87,6 @@ The specification successfully transforms the user's request into a clear, actio
 2. **MCP Tool Integration**: Design the tool registry and invocation layer for seamless MCP server integration
 3. **Fallback Strategy**: Plan the decision logic for when to use agentic vs. OpenSearch approaches
 4. **Context Management**: Design the conversational context storage and reference resolution system
-5. **Observability Framework**: Plan logging, tracing, and monitoring for agent decisions and tool invocations
-6. **Testing Strategy**: Define integration tests for agent workflows and end-to-end scenarios
+5. **Remediation Review Flow**: Design the preview, quick-apply, and review-and-customize user journeys for supported security and optimization actions
+6. **Auditability Model**: Define how generated defaults, final applied values, changed fields, and manual analysis notes are captured and retained
+7. **Testing Strategy**: Define integration tests for agent workflows, remediation override validation, and end-to-end review scenarios

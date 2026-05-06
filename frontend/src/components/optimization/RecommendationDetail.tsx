@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CheckCircle, XCircle, PlayCircle, Trash2, Clock } from 'lucide-react';
 import { OptimizationRecommendation, OptimizationAction } from '../../types/optimization';
-import { ConfirmationModal } from '../common/ConfirmationModal';
 
 interface Props {
   recommendation: OptimizationRecommendation;
@@ -24,7 +23,6 @@ export const RecommendationDetail: React.FC<Props> = ({
 }) => {
   const { ai_context, remediation_actions } = recommendation;
   const [showActions, setShowActions] = useState(false);
-  const [showRemediateModal, setShowRemediateModal] = useState(false);
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -152,12 +150,12 @@ export const RecommendationDetail: React.FC<Props> = ({
         <div className="flex gap-3 flex-wrap">
           {recommendation.gateway_id && recommendation.status === 'pending' && onApply && (
             <button
-              onClick={() => setShowRemediateModal(true)}
+              onClick={() => onApply(recommendation.gateway_id!, recommendation.id)}
               disabled={isApplying}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
             >
               <PlayCircle className="w-4 h-4" />
-              {isApplying ? 'Remediating...' : 'Remediate'}
+              {isApplying ? 'Remediating...' : 'Review & Apply'}
             </button>
           )}
 
@@ -252,10 +250,55 @@ export const RecommendationDetail: React.FC<Props> = ({
                         <span className="font-medium">Error:</span> {action.error_message}
                       </div>
                     )}
+                    {action.metadata?.override_metadata && (
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                        <div className="font-medium text-blue-900 mb-2 flex items-center gap-2">
+                          <span>✏️</span>
+                          Manual Overrides Applied
+                        </div>
+                        <div className="text-sm space-y-1">
+                          {action.metadata.override_metadata.overridden_fields &&
+                           action.metadata.override_metadata.overridden_fields.length > 0 && (
+                            <div>
+                              <span className="font-medium text-blue-800">Modified Fields:</span>
+                              <ul className="ml-4 mt-1 space-y-1">
+                                {action.metadata.override_metadata.overridden_fields.map((field: string, idx: number) => {
+                                  const oldValue = action.metadata?.override_metadata?.original_values?.[field];
+                                  const newValue = action.metadata?.override_metadata?.new_values?.[field];
+                                  return (
+                                    <li key={idx} className="text-blue-700">
+                                      <span className="font-mono text-xs">{field}</span>
+                                      {oldValue !== undefined && newValue !== undefined && (
+                                        <span className="ml-2 text-gray-600">
+                                          ({JSON.stringify(oldValue)} → {JSON.stringify(newValue)})
+                                        </span>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                          {action.metadata.override_metadata.manual_analysis_notes && (
+                            <div className="mt-2">
+                              <span className="font-medium text-blue-800">Analysis Notes:</span>
+                              <p className="text-blue-700 mt-1 italic">
+                                "{action.metadata.override_metadata.manual_analysis_notes}"
+                              </p>
+                            </div>
+                          )}
+                          {action.metadata.override_metadata.reviewed_by && (
+                            <div className="mt-1 text-xs text-blue-600">
+                              Reviewed by: {action.metadata.override_metadata.reviewed_by}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     {action.metadata && Object.keys(action.metadata).length > 0 && (
                       <details className="mt-2">
                         <summary className="cursor-pointer text-blue-600 hover:text-blue-700">
-                          View Metadata
+                          View Full Metadata
                         </summary>
                         <pre className="mt-2 p-2 bg-white border rounded text-xs overflow-x-auto">
                           {JSON.stringify(action.metadata, null, 2)}
@@ -270,21 +313,6 @@ export const RecommendationDetail: React.FC<Props> = ({
         </div>
       )}
 
-      <ConfirmationModal
-        isOpen={showRemediateModal}
-        title="Confirm Remediation"
-        message={`Are you sure you want to remediate "${recommendation.title}"?`}
-        confirmLabel="Yes, Remediate"
-        cancelLabel="Cancel"
-        onConfirm={() => onApply?.(recommendation.gateway_id, recommendation.id)}
-        onCancel={() => {
-          if (!isApplying) {
-            setShowRemediateModal(false);
-          }
-        }}
-        isProcessing={isApplying}
-        processingMessage="Applying remediation actions..."
-      />
 
       {/* Validation Results */}
       {recommendation.validation_results && (

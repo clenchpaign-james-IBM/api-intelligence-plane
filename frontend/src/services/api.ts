@@ -210,8 +210,18 @@ export const api = {
     apply: (id: string) => api.post(`/api/v1/recommendations/${id}/apply`),
     
     // Gateway-scoped remediation endpoints
-    applyToGateway: (gatewayId: string, recommendationId: string) =>
-      api.post(`/api/v1/gateways/${gatewayId}/optimization/recommendations/${recommendationId}/apply`),
+    previewPolicy: (gatewayId: string, recommendationId: string) =>
+      api.post(`/api/v1/gateways/${gatewayId}/optimization/recommendations/${recommendationId}/preview`),
+    
+    applyToGateway: (gatewayId: string, recommendationId: string, overrideRequest?: {
+      override_config?: Record<string, any>;
+      manual_analysis?: {
+        reason?: string;
+        risk_acknowledgement?: string;
+        reviewed_by?: string;
+      };
+    }) =>
+      api.post(`/api/v1/gateways/${gatewayId}/optimization/recommendations/${recommendationId}/apply`, overrideRequest),
     
     removeFromGateway: (gatewayId: string, recommendationId: string) =>
       api.delete(`/api/v1/gateways/${gatewayId}/optimization/recommendations/${recommendationId}/policy`),

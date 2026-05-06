@@ -41,11 +41,16 @@ class ScanResponse(BaseModel):
 
 
 class RemediationRequest(BaseModel):
-    """Request model for vulnerability remediation."""
+    """Request model for vulnerability remediation with optional overrides."""
 
-    vulnerability_id: UUID = Field(..., description="Vulnerability to remediate")
     remediation_strategy: Optional[str] = Field(
         None, description="Optional specific strategy"
+    )
+    override_config: Optional[dict] = Field(
+        None, description="Optional policy configuration overrides"
+    )
+    manual_analysis: Optional[dict] = Field(
+        None, description="Optional manual analysis metadata (reason, reviewed_by, etc.)"
     )
 
 
@@ -552,6 +557,122 @@ async def get_gateway_vulnerability(
 
 
 @router.post(
+    "/gateways/{gateway_id}/security/vulnerabilities/{vulnerability_id}/preview-remediation",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Preview remediation policy",
+    description="Preview the default policy configuration for vulnerability remediation",
+)
+async def preview_vulnerability_remediation(
+    gateway_id: UUID,
+    vulnerability_id: UUID,
+    security_service: SecurityService = Depends(get_security_service),
+) -> dict:
+    """Preview the default policy configuration that would be applied for vulnerability remediation.
+    
+    This endpoint generates a policy draft showing:
+    - Default configuration values
+    - Editable fields with metadata
+    - Warnings and constraints
+    
+    Use this before calling the remediate endpoint to review and customize the policy.
+    
+    Args:
+        gateway_id: Gateway UUID (required)
+        vulnerability_id: Vulnerability to preview remediation for
+        security_service: Security service dependency
+    
+    Returns:
+        Dictionary with policy draft:
+            - policy_type: str (e.g., "rate_limiting", "tls")
+            - action_type: str (PolicyActionType value)
+            - default_config: dict (default configuration values)
+            - editable_fields: list (fields that can be customized)
+            - manual_analysis_required: bool
+            - warnings: list (any warnings about the policy)
+    
+    Raises:
+        HTTPException: If gateway or vulnerability not found, or if vulnerability type doesn't support preview
+    """
+    try:
+        # Verify gateway exists
+        from app.db.repositories.gateway_repository import GatewayRepository
+        gateway_repo = GatewayRepository()
+        gateway = gateway_repo.get(str(gateway_id))
+        
+        if not gateway:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Gateway {gateway_id} not found",
+            )
+        
+        # Get vulnerability
+        vulnerability = security_service.vulnerability_repository.get(str(vulnerability_id))
+        
+        if not vulnerability:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vulnerability {vulnerability_id} not found",
+            )
+        
+        # Get API
+        from app.db.repositories.api_repository import APIRepository
+        api_repo = APIRepository()
+        api = api_repo.get(str(vulnerability.api_id))
+        
+        if not api:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"API {vulnerability.api_id} not found",
+            )
+        
+        # Verify vulnerability belongs to gateway
+        if str(api.gateway_id) != str(gateway_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vulnerability {vulnerability_id} not found in gateway {gateway_id}",
+            )
+        
+        # Generate policy draft
+        from app.services.policy_draft_service import PolicyDraftService
+        draft_service = PolicyDraftService()
+        
+        try:
+            draft = draft_service.generate_security_draft(vulnerability, api)
+            
+            # Apply vendor-specific field restrictions
+            draft.editable_fields = draft_service.apply_vendor_restrictions(
+                draft.editable_fields,
+                gateway.vendor,
+                draft.policy_type
+            )
+            
+            # Add vendor info to response
+            draft_dict = draft.dict()
+            draft_dict["vendor_constraints"] = {
+                "vendor": gateway.vendor,
+                "vendor_name": gateway.name,
+            }
+            
+            return draft_dict
+        except ValueError as e:
+            # Vulnerability type doesn't support automated remediation preview
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to preview remediation for vulnerability {vulnerability_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview remediation: {str(e)}",
+        )
+
+
+@router.post(
     "/gateways/{gateway_id}/security/vulnerabilities/{vulnerability_id}/remediate",
     response_model=RemediationResponse,
     status_code=status.HTTP_200_OK,
@@ -610,12 +731,21 @@ async def remediate_gateway_vulnerability(
         logger.info(f"Remediating vulnerability {vulnerability_id} in gateway {gateway_id}")
 
         remediation_strategy = None
+        override_request = None
+        
         if request:
             remediation_strategy = request.remediation_strategy
+            # Build override request if overrides provided
+            if request.override_config or request.manual_analysis:
+                override_request = {
+                    "override_config": request.override_config,
+                    "manual_analysis": request.manual_analysis
+                }
 
         result = await security_service.remediate_vulnerability(
             vulnerability_id=vulnerability_id,
             remediation_strategy=remediation_strategy,
+            override_request=override_request,
         )
 
         return RemediationResponse(**result)

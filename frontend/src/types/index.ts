@@ -537,6 +537,16 @@ export interface RemediationAction {
   performed_by?: string;
   gateway_policy_id?: string;
   error_message?: string;
+  metadata?: {
+    override_metadata?: {
+      overridden_fields?: string[];
+      original_values?: Record<string, any>;
+      new_values?: Record<string, any>;
+      manual_analysis_notes?: string;
+      reviewed_by?: string;
+    };
+    [key: string]: any;
+  };
 }
 
 // Security Posture

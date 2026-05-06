@@ -663,6 +663,131 @@ class PatternSimulator:
             
             return results
     
+    def _prediction_trigger_pattern(self, config: PatternConfig) -> list[RequestResult]:
+        """
+        Generate traffic designed to trigger API health predictions.
+        
+        This pattern creates three distinct phases to trigger different prediction types:
+        
+        Phase 1 (0-33%): Degradation Risk
+        - Gradual response time increase (simulated via increasing load)
+        - Declining throughput (reduced RPS)
+        - Moderate error rate increase (5-10%)
+        
+        Phase 2 (33-66%): Capacity Risk
+        - Rapid request growth (2x-3x normal RPS)
+        - High P99 response times (aggressive concurrent requests)
+        
+        Phase 3 (66-100%): Failure Risk
+        - High error rate (>10% and increasing)
+        - Degrading response times (>2000ms P95)
+        - Declining availability (<95%)
+        """
+        total_requests = int(config.duration_seconds * config.base_rps)
+        phase1_end = total_requests // 3
+        phase2_end = (total_requests * 2) // 3
+        
+        request_number = 0
+        next_run = time.perf_counter()
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = []
+            
+            while self.running and request_number < total_requests:
+                request_number += 1
+                
+                # Determine current phase
+                if request_number <= phase1_end:
+                    # Phase 1: Degradation Risk
+                    # Gradual slowdown with moderate errors
+                    phase = "degradation"
+                    progress = request_number / phase1_end
+                    
+                    # Gradually reduce RPS (declining throughput)
+                    current_rps = config.base_rps * (1.0 - 0.3 * progress)
+                    interval = 1.0 / current_rps
+                    
+                    # Moderate error injection (5-10%)
+                    error_probability = 0.05 + (0.05 * progress)
+                    should_inject_error = random.random() < error_probability
+                    
+                    if should_inject_error:
+                        url = self._generate_error_endpoint(request_number, "degradation")
+                        phase_label = f"degradation-error-{int(error_probability * 100)}%"
+                    else:
+                        url = self.base_url
+                        phase_label = f"degradation-normal-{int(progress * 100)}%"
+                
+                elif request_number <= phase2_end:
+                    # Phase 2: Capacity Risk
+                    # Rapid traffic growth with high concurrency
+                    phase = "capacity"
+                    progress = (request_number - phase1_end) / (phase2_end - phase1_end)
+                    
+                    # Rapidly increase RPS (2x-3x normal)
+                    rps_multiplier = 2.0 + (1.0 * progress)
+                    current_rps = config.base_rps * rps_multiplier
+                    interval = 1.0 / current_rps
+                    
+                    # Low error rate during capacity stress
+                    should_inject_error = random.random() < 0.05
+                    
+                    if should_inject_error:
+                        url = self._generate_error_endpoint(request_number, "capacity-overload")
+                        phase_label = f"capacity-overload-{int(rps_multiplier)}x"
+                    else:
+                        url = self.base_url
+                        phase_label = f"capacity-growth-{int(rps_multiplier)}x"
+                
+                else:
+                    # Phase 3: Failure Risk
+                    # High error rate with degrading performance
+                    phase = "failure"
+                    progress = (request_number - phase2_end) / (total_requests - phase2_end)
+                    
+                    # Return to normal RPS but with high errors
+                    current_rps = config.base_rps
+                    interval = 1.0 / current_rps
+                    
+                    # High and increasing error rate (10-30%)
+                    error_probability = 0.10 + (0.20 * progress)
+                    should_inject_error = random.random() < error_probability
+                    
+                    if should_inject_error:
+                        url = self._generate_error_endpoint(request_number, "failure-imminent")
+                        phase_label = f"failure-error-{int(error_probability * 100)}%"
+                    else:
+                        url = self.base_url
+                        phase_label = f"failure-normal-{int(progress * 100)}%"
+                
+                futures.append(executor.submit(
+                    self._execute_request,
+                    request_number,
+                    url,
+                    self.method,
+                    self.payload,
+                    self.auth,
+                    phase_label,
+                ))
+                
+                next_run += interval
+                sleep_for = next_run - time.perf_counter()
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+                else:
+                    next_run = time.perf_counter()
+            
+            # Collect results
+            results = []
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    with self.print_lock:
+                        print(f"ERROR collecting result: {e}")
+            
+            return results
+    
     def run_pattern(self, pattern_name: str, config: PatternConfig) -> list[RequestResult]:
         """Run the specified pattern."""
         print(f"\n{'='*80}")
@@ -680,6 +805,7 @@ class PatternSimulator:
             "rate-limit-hit": self._rate_limit_hit_pattern,
             "auth-failures": self._auth_failures_pattern,
             "shadow-api-probe": self._shadow_api_probe_pattern,
+            "prediction-trigger": self._prediction_trigger_pattern,
             # Response time patterns rely on gateway behavior
             "decreasing-response-time": self._steady_pattern,
             "increasing-response-time": self._steady_pattern,
@@ -748,6 +874,7 @@ def parse_args() -> argparse.Namespace:
             "rate-limit-hit",
             "auth-failures",
             "shadow-api-probe",
+            "prediction-trigger",
         ],
         help="Traffic pattern to simulate",
     )
@@ -804,7 +931,7 @@ def main() -> int:
         duration_seconds=args.duration,
         error_injection_enabled=True,
         auth_variation_enabled=args.pattern == "auth-failures",
-        endpoint_variation_enabled=args.pattern in ["shadow-api-probe", "increasing-error-trend"],
+        endpoint_variation_enabled=args.pattern in ["shadow-api-probe", "increasing-error-trend", "prediction-trigger"],
     )
     
     # Create simulator

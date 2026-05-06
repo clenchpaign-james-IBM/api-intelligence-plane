@@ -22,6 +22,12 @@
 - Q: When the coordinator invokes a specialized agent and receives results, should the agent itself perform LLM-powered synthesis/grouping before returning to the coordinator, or should the coordinator handle all synthesis after collecting results from multiple agents? → A: Agent-level synthesis (RECOMMENDED) - Each specialized agent uses LLM to synthesize and group its own tool results before returning to coordinator. This distributes the synthesis workload, enables domain-specific grouping logic, and provides cleaner interfaces between agents.
 - Q: For the iterative coordinator reasoning, when should the coordinator decide to stop iterating? What completion criteria should trigger the end of the reasoning loop? → A: LLM-based completion decision (RECOMMENDED) - After each iteration, LLM evaluates if sufficient information has been gathered to answer the user's query. Stops when LLM determines answer is complete or max iterations reached.
 
+### Session 2026-05-05
+
+- Q: When remediation or optimization policy application is proposed for a gateway, should users be able to adjust recommended default policy values before execution? → A: Yes - users should be able to review generated default values, manually adjust supported policy fields, and provide manual analysis/rationale before the policy is applied
+- Q: Should the system continue to support immediate execution using generated defaults? → A: Yes - retain quick apply/remediate with generated defaults, but add a review-and-customize flow for supported security and optimization actions
+- Q: How should user-provided remediation changes be governed? → A: Persist the generated defaults, final applied values, changed fields, and manual analysis notes as part of remediation action history for auditability
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Basic Agentic Query Execution (Priority: P1)
@@ -129,6 +135,25 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 
 ---
 
+### User Story 7 - Remediation Policy Review and Manual Override (Priority: P2)
+
+Users can review generated remediation or optimization policy values before gateway application, adjust supported fields, and provide manual analysis so the final policy matches operational and security requirements without requiring code changes.
+
+**Why this priority**: The system can identify the right policy type, but fixed default values are often not appropriate for every API, gateway, or environment. Allowing human review and targeted overrides improves safety, usability, and governance while preserving automation.
+
+**Independent Test**: Can be tested by selecting a security vulnerability or optimization recommendation, opening a policy review flow, changing one or more generated values, submitting the action, and verifying that the final applied policy and manual analysis are recorded in the remediation history.
+
+**Acceptance Scenarios**:
+
+1. **Given** a user initiates remediation for a rate-limiting security finding, **When** the system presents generated default values, **Then** the user can adjust supported fields such as limits, burst allowance, and enforcement behavior before applying the policy
+2. **Given** a user initiates an optimization recommendation for caching, **When** the system presents a review flow, **Then** the user can modify supported cache settings such as TTL and key strategy and submit the revised policy for application
+3. **Given** a user accepts the generated defaults without changes, **When** the policy is applied, **Then** the system records that the default configuration was used and completes the action without requiring manual edits
+4. **Given** a user overrides one or more generated values, **When** the policy is applied, **Then** the system records the generated defaults, final applied values, changed fields, and manual analysis notes in the remediation history
+5. **Given** a user provides an invalid override combination, **When** the system validates the policy before execution, **Then** the user receives clear validation feedback and the policy is not applied until the input is corrected
+6. **Given** a gateway vendor does not support one or more editable fields, **When** the review flow is displayed, **Then** unsupported fields are clearly identified and cannot be submitted as editable overrides
+
+---
+
 ### Edge Cases
 
 - What happens when multiple MCP tools could satisfy a query but with different trade-offs (e.g., `list_apis` vs `search_apis`)? Agent should prefer search APIs when complex filtering is needed.
@@ -141,6 +166,11 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - How does the system handle rate limiting from the MCP server or backend?
 - What happens when the coordinator needs to invoke the same agent multiple times with different parameters based on intermediate results?
 - How does the system prevent infinite loops when the coordinator keeps invoking tools without making progress?
+- What happens when generated remediation defaults are too strict or too permissive for a specific API workload?
+- What happens when a user overrides only some fields and the remaining fields should continue using generated defaults?
+- What happens when user-supplied remediation values are valid in general but not supported by the selected gateway vendor?
+- What happens when a user wants fast execution and chooses not to review policy details before remediation?
+- What happens when a user submits manual analysis notes but no actual policy changes?
 
 ## Requirements *(mandatory)*
 
@@ -172,6 +202,16 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - **FR-024**: System MUST implement loop detection to prevent infinite coordinator reasoning cycles (max iterations: 10)
 - **FR-025**: Specialized agents MUST use LLM-powered synthesis to aggregate and group tool results by entities (e.g., vulnerabilities → APIs) before returning to coordinator
 - **FR-026**: System MUST generate natural language responses that match user intent by understanding entity relationships (e.g., "8 APIs with vulnerabilities" not "40 vulnerabilities")
+- **FR-027**: System MUST generate a reviewable policy draft for supported Security and Optimization remediation actions before gateway application
+- **FR-028**: System MUST allow users to override supported generated policy fields for remediation and optimization actions before execution
+- **FR-029**: System MUST validate user-supplied override values and reject invalid or unsupported combinations before policy application
+- **FR-030**: System MUST preserve an immediate execution path that applies generated default values without requiring manual review
+- **FR-031**: System MUST support a review-and-customize path that lets users inspect generated defaults, submit manual analysis, and apply a revised policy
+- **FR-032**: System MUST record the generated default policy, final applied policy, changed fields, and manual analysis notes in remediation action history for auditability
+- **FR-033**: System MUST identify which policy fields are editable, non-editable, or unsupported for the selected remediation type and gateway context
+- **FR-034**: System MUST preserve generated default values for all fields not explicitly overridden by the user
+- **FR-035**: System MUST prevent submission of override fields that are not applicable to the selected remediation or optimization action type
+- **FR-036**: System MUST present clear feedback when gateway-specific support limitations prevent one or more override fields from being applied
 
 ### Key Entities
 
@@ -186,6 +226,9 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - **SearchCriteria**: Represents flexible search parameters including text patterns, filters, date ranges, and pagination options
 - **CoordinatorState**: Tracks coordinator's iterative reasoning state including steps completed, intermediate results, and next actions to evaluate
 - **EntityGrouping**: Represents aggregated results grouped by entity type (e.g., APIs, gateways) with associated metadata from multiple tool invocations
+- **PolicyDraft**: Represents the generated default remediation or optimization policy proposed for a gateway action, including editable fields, unsupported fields, and validation metadata
+- **PolicyOverrideSubmission**: Represents user-supplied policy changes and manual analysis notes submitted before remediation or optimization execution
+- **ManualAnalysisRecord**: Represents the user rationale, review context, and change summary associated with a customized remediation action
 
 ## Success Criteria *(mandatory)*
 
@@ -206,6 +249,10 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - **SC-013**: Coordinator successfully resolves 90%+ of multi-step queries requiring iterative reasoning (e.g., "APIs in gateway X with vulnerabilities") without fallback
 - **SC-014**: Entity grouping accuracy reaches 95%+ (e.g., correctly grouping 40 vulnerabilities into 8 affected APIs)
 - **SC-015**: Iterative coordinator reasoning completes within 3 iterations for 80%+ of multi-step queries
+- **SC-016**: Users can complete review-and-customize remediation for supported security and optimization actions in under 2 minutes in 90% of attempts
+- **SC-017**: 100% of customized remediation executions include an auditable record of generated defaults, final applied values, and manual analysis notes
+- **SC-018**: 95% of valid partial override submissions apply successfully without requiring users to re-enter unchanged default values
+- **SC-019**: Validation prevents 100% of unsupported or invalid override submissions from being applied to gateways
 
 ## Assumptions *(mandatory)*
 
@@ -221,6 +268,9 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 10. **Search API Coverage**: Search APIs cover the 6 main feature categories (gateways, APIs, vulnerabilities, compliance, recommendations, predictions)
 11. **LLM Synthesis Capability**: LLM can reliably group and aggregate tool results by entity relationships (e.g., vulnerabilities → APIs)
 12. **Iterative Reasoning Performance**: Coordinator's iterative reasoning loops complete within acceptable latency budgets (2-3 iterations typical)
+13. **Remediation Draft Availability**: Supported security and optimization actions can produce a deterministic default policy draft before execution
+14. **User Review Permissions**: Users who can apply remediation are also permitted to review and customize supported policy values for their authorized gateways
+15. **Audit Storage Capacity**: Existing remediation and recommendation history storage can retain generated defaults, applied values, and manual analysis notes without requiring a separate retention model
 
 ## Dependencies *(mandatory)*
 
@@ -256,6 +306,9 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 8. **External Data Sources**: Agents only access data through MCP server tools, not external APIs
 9. **Query Optimization Suggestions**: System does not suggest query rewrites or optimizations
 10. **Agent Customization**: Users cannot configure agent behavior or tool selection strategies
+11. **Arbitrary Policy Authoring**: Users cannot create entirely new remediation policy types outside the supported Security and Optimization actions
+12. **Full Vendor-Specific Authoring**: Users cannot directly edit raw vendor-native gateway payloads; customization is limited to supported reviewable fields
+13. **Automated Policy Tuning**: System does not automatically optimize remediation values based on live traffic beyond generating an initial default draft
 
 ## Non-Functional Requirements *(mandatory)*
 
@@ -290,6 +343,8 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - Tool parameters must be validated to prevent injection attacks
 - Sensitive data in tool responses must be masked in logs
 - Agent reasoning must not expose internal system details to users
+- Manual analysis notes and remediation override history must respect existing authorization rules and only be visible to authorized users
+- Review-and-customize remediation flows must validate all user-entered values before execution and prevent unsupported field injection
 
 ### Maintainability
 - Agent logic must be modular and independently testable
@@ -298,3 +353,4 @@ Users benefit from a coordinator agent that iteratively reasons about which agen
 - Agent workflows must be debuggable with detailed trace logs
 - Coordinator reasoning logic must be testable with mock intermediate results
 - Entity grouping logic must be testable with synthetic tool results
+- Policy draft generation, partial override merging, and remediation audit recording must be independently testable for supported security and optimization actions
